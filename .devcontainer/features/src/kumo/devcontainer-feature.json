@@ -1,0 +1,12 @@
+{
+  "name": "kumo",
+  "id": "kumo",
+  "version": "0.1.0",
+  "options": {
+    "version": {
+      "type": "string",
+      "default": "latest"
+    }
+  },
+  "entrypoint": "/usr/local/share/kumo-init.sh"
+}
