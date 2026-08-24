@@ -42,21 +42,29 @@ func runMigrate(db *sql.DB, name string, version int, current *int) error {
 	return nil
 }
 
+type dbCollectionKey struct {
+	id *int64
+}
+
 type dbCollection struct {
-	id       *int64
+	dbCollectionKey
 	label    *string
 	created  *string
 	modified *string
 }
 
-type dbItem struct {
+type dbItemKey struct {
 	id           *int64
 	collectionId *int64
-	secret       []byte
-	label        *string
-	created      *string
-	modified     *string
-	attributes   map[string]string
+}
+
+type dbItem struct {
+	dbItemKey
+	secret     []byte
+	label      *string
+	created    *string
+	modified   *string
+	attributes map[string]string
 }
 
 func insertCollection(tx *sql.Tx, collection *dbCollection) error {
@@ -76,6 +84,18 @@ func deleteCollection(tx *sql.Tx, id int64) error {
 		return err
 	}
 
+	q2 := "DELETE FROM item_attr WHERE item_id IN (SELECT id FROM item where collection_id = ?)"
+
+	if _, err := tx.Exec(q2, id); err != nil {
+		return err
+	}
+
+	q3 := "DELETE FROM item WHERE collection_id = ?"
+
+	if _, err := tx.Exec(q3, id); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -90,9 +110,9 @@ func findCollection(tx *sql.Tx, id int64) (*dbCollection, error) {
 	return &r, nil
 }
 
-func listCollections(tx *sql.Tx) iter.Seq2[*dbCollection, error] {
-	return func(yield func(*dbCollection, error) bool) {
-		q := "SELECT id, label, created, modified FROM collection ORDER BY id ASC"
+func listCollections(tx *sql.Tx) iter.Seq2[*dbCollectionKey, error] {
+	return func(yield func(*dbCollectionKey, error) bool) {
+		q := "SELECT id FROM collection ORDER BY id ASC"
 
 		rows, err := tx.Query(q)
 		if err != nil {
@@ -102,8 +122,8 @@ func listCollections(tx *sql.Tx) iter.Seq2[*dbCollection, error] {
 		defer rows.Close()
 
 		for rows.Next() {
-			var r dbCollection
-			if err := rows.Scan(&r.id, &r.label, &r.created, &r.modified); err != nil {
+			var r dbCollectionKey
+			if err := rows.Scan(&r.id); err != nil {
 				yield(nil, err)
 				return
 			}
@@ -222,9 +242,9 @@ func getItem(tx *sql.Tx, id int64) (*dbItem, error) {
 	return &item, nil
 }
 
-func searchItems(tx *sql.Tx, attributes map[string]string) iter.Seq2[*dbItem, error] {
-	return func(yield func(*dbItem, error) bool) {
-		q := "SELECT id, collection_id, secret, label, created, modified, (SELECT json_group_object(a.key, a.value) FROM item_attr a WHERE a.item_id = i.id) FROM item i"
+func searchItems(tx *sql.Tx, attributes map[string]string) iter.Seq2[*dbItemKey, error] {
+	return func(yield func(*dbItemKey, error) bool) {
+		q := "SELECT id, collection_id FROM item i"
 
 		keys := make([]string, 0, len(attributes))
 		for k := range attributes {
@@ -255,15 +275,9 @@ func searchItems(tx *sql.Tx, attributes map[string]string) iter.Seq2[*dbItem, er
 		defer rows.Close()
 
 		for rows.Next() {
-			var r dbItem
-			var b []byte
+			var r dbItemKey
 
-			if err := rows.Scan(&r.id, &r.collectionId, &r.secret, &r.label, &r.created, &r.modified, &b); err != nil {
-				yield(nil, err)
-				return
-			}
-
-			if err := json.Unmarshal(b, &r.attributes); err != nil {
+			if err := rows.Scan(&r.id, &r.collectionId); err != nil {
 				yield(nil, err)
 				return
 			}

@@ -79,27 +79,25 @@ func TestListCollections(t *testing.T) {
 		t.Fatal()
 	}
 
+	wants := map[int64]any{
+		1: struct{}{},
+		2: struct{}{},
+		3: struct{}{},
+	}
 	for c, err := range listCollections(tx) {
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		switch *c.id {
-		case 1:
-			if *c.label != "default" {
-				t.Fatal()
-			}
-		case 2:
-			if *c.label != "a" {
-				t.Fatal()
-			}
-		case 3:
-			if *c.label != "b" {
-				t.Fatal()
-			}
-		default:
+		_, ok := wants[*c.id]
+		if !ok {
 			t.Fatal()
 		}
+		delete(wants, *c.id)
+	}
+
+	if len(wants) != 0 {
+		t.Fatal()
 	}
 }
 
