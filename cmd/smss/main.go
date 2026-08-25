@@ -2,7 +2,9 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 
+	"github.com/adrg/xdg"
 	"github.com/godbus/dbus/v5"
 	_ "modernc.org/sqlite"
 
@@ -10,8 +12,12 @@ import (
 )
 
 func main() {
-	// TODO
-	dsn := "file:./data.db"
+	file, err := xdg.DataFile("smss/db.dat")
+	if err != nil {
+		panic(err)
+	}
+
+	dsn := fmt.Sprintf("file:%s", file)
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
