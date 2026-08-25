@@ -1,4 +1,4 @@
-package main
+package smss
 
 import (
 	"fmt"
@@ -7,16 +7,16 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
-type Item struct {
-	env          *env
+type item struct {
+	env          *Env
 	collectionId int64
 	id           int64
 	path         dbus.ObjectPath
 }
 
-func newItem(env *env, collectionId, id int64) *Item {
+func newItem(env *Env, collectionId, id int64) *item {
 	path := dbus.ObjectPath(fmt.Sprintf("/org/freedesktop/secrets/collection/%d/%d", collectionId, id))
-	return &Item{
+	return &item{
 		env:          env,
 		collectionId: collectionId,
 		id:           id,
@@ -24,7 +24,7 @@ func newItem(env *env, collectionId, id int64) *Item {
 	}
 }
 
-func (i *Item) export() error {
+func (i *item) export() error {
 	mappingItem := map[string]string{
 		"Delete":    "Delete",
 		"GetSecret": "GetSecret",
@@ -50,11 +50,11 @@ func (i *Item) export() error {
 
 // org.freedesktop.Secret.Item
 
-func (i *Item) Delete() (*dbus.ObjectPath, *dbus.Error) {
+func (i *item) Delete() (*dbus.ObjectPath, *dbus.Error) {
 	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }
 
-func (i *Item) GetSecret(session dbus.ObjectPath) (*Secret, *dbus.Error) {
+func (i *item) GetSecret(session dbus.ObjectPath) (*secret, *dbus.Error) {
 	s, ok := i.env.sessions[session]
 	if !ok {
 		return nil, errNoSession
@@ -79,7 +79,7 @@ func (i *Item) GetSecret(session dbus.ObjectPath) (*Secret, *dbus.Error) {
 		return nil, dbus.MakeFailedError(fmt.Errorf("Failure"))
 	}
 
-	secret := Secret{
+	secret := secret{
 		Session:     session,
 		Parameters:  iv,
 		Value:       cipherText,
@@ -89,21 +89,21 @@ func (i *Item) GetSecret(session dbus.ObjectPath) (*Secret, *dbus.Error) {
 	return &secret, nil
 }
 
-func (i *Item) SetSecret(secret *Secret) *dbus.Error {
+func (i *item) SetSecret(secret *secret) *dbus.Error {
 	return dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }
 
 // org.freedesktop.DBus.Properties
 
-func (i *Item) Get(iface, name string) (*dbus.Variant, *dbus.Error) {
+func (i *item) Get(iface, name string) (*dbus.Variant, *dbus.Error) {
 	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }
 
-func (i *Item) Set(iface, name string, value dbus.Variant) *dbus.Error {
+func (i *item) Set(iface, name string, value dbus.Variant) *dbus.Error {
 	return dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }
 
-func (i *Item) GetAll(iface string) (map[string]dbus.Variant, *dbus.Error) {
+func (i *item) GetAll(iface string) (map[string]dbus.Variant, *dbus.Error) {
 	if iface != "org.freedesktop.Secret.Item" {
 		return nil, &dbus.ErrMsgUnknownInterface
 	}

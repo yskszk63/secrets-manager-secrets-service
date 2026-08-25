@@ -1,4 +1,4 @@
-package main
+package smss
 
 import (
 	"fmt"
@@ -7,22 +7,22 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
-type Collection struct {
-	env  *env
+type collection struct {
+	env  *Env
 	id   int64
 	path dbus.ObjectPath
 }
 
-func newCollection(env *env, id int64) *Collection {
+func newCollection(env *Env, id int64) *collection {
 	path := dbus.ObjectPath(fmt.Sprintf("/org/freedesktop/secrets/collection/%d", id))
-	return &Collection{
+	return &collection{
 		env:  env,
 		id:   id,
 		path: path,
 	}
 }
 
-func (c *Collection) export() error {
+func (c *collection) export() error {
 	mappingCollection := map[string]string{
 		"Delete":      "Delete",
 		"SearchItems": "SearchItems",
@@ -48,15 +48,15 @@ func (c *Collection) export() error {
 
 // org.freedesktop.Secret.Collection
 
-func (s *Collection) Delete() (*dbus.ObjectPath, *dbus.Error) {
+func (s *collection) Delete() (*dbus.ObjectPath, *dbus.Error) {
 	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }
 
-func (s *Collection) SearchItems(attributes map[string]string) ([]dbus.ObjectPath, *dbus.Error) {
+func (s *collection) SearchItems(attributes map[string]string) ([]dbus.ObjectPath, *dbus.Error) {
 	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }
 
-func (s *Collection) CreateItem(properties map[string]dbus.Variant, secret Secret, replace bool) (*dbus.ObjectPath, *dbus.ObjectPath, *dbus.Error) {
+func (s *collection) CreateItem(properties map[string]dbus.Variant, secret secret, replace bool) (*dbus.ObjectPath, *dbus.ObjectPath, *dbus.Error) {
 	session, found := s.env.sessions[secret.Session]
 	if !found {
 		return nil, nil, errNoSession
@@ -117,14 +117,14 @@ func (s *Collection) CreateItem(properties map[string]dbus.Variant, secret Secre
 
 // org.freedesktop.DBus.Properties
 
-func (c *Collection) Get(iface, name string) (*dbus.Variant, *dbus.Error) {
+func (c *collection) Get(iface, name string) (*dbus.Variant, *dbus.Error) {
 	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }
 
-func (c *Collection) Set(iface, name string, value dbus.Variant) *dbus.Error {
+func (c *collection) Set(iface, name string, value dbus.Variant) *dbus.Error {
 	return dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }
 
-func (c *Collection) GetAll(iface string) (map[string]dbus.Variant, *dbus.Error) {
+func (c *collection) GetAll(iface string) (map[string]dbus.Variant, *dbus.Error) {
 	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }

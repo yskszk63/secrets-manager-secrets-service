@@ -1,4 +1,4 @@
-module smss
+module github.com/yskszk63/smss
 
 go 1.27.0
 

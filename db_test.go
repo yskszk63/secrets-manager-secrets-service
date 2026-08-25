@@ -1,15 +1,28 @@
-package main
+package smss
 
 import (
 	//"maps"
+	"database/sql"
 	"testing"
+
+	_ "modernc.org/sqlite"
 )
 
-func TestInsertFindCollection(t *testing.T) {
-	db, err := openDb(":memory:")
+func openDb() *sql.DB {
+	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
-		t.Fatal(err)
+		panic(err)
 	}
+
+	if err := Migrate(db); err != nil {
+		panic(err)
+	}
+
+	return db
+}
+
+func TestInsertFindCollection(t *testing.T) {
+	db := openDb()
 	defer db.Close()
 
 	tx, err := db.Begin()
@@ -51,10 +64,7 @@ func TestInsertFindCollection(t *testing.T) {
 }
 
 func TestListCollections(t *testing.T) {
-	db, err := openDb(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openDb()
 	defer db.Close()
 
 	tx, err := db.Begin()
@@ -102,10 +112,7 @@ func TestListCollections(t *testing.T) {
 }
 
 func TestItemInsertUpdate(t *testing.T) {
-	db, err := openDb(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openDb()
 	defer db.Close()
 
 	tx, err := db.Begin()
@@ -142,10 +149,7 @@ func TestItemInsertUpdate(t *testing.T) {
 }
 
 func TestSearchItems(t *testing.T) {
-	db, err := openDb(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := openDb()
 	defer db.Close()
 
 	tx, err := db.Begin()

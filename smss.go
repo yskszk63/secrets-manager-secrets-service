@@ -1,12 +1,10 @@
-package main
+package smss
 
 import (
-	"reflect"
-
 	"github.com/godbus/dbus/v5"
 )
 
-func loadAndExport(env *env) ([]*Collection, error) {
+func loadAndExport(env *Env) ([]*collection, error) {
 	tx, err := env.db.Begin()
 	if err != nil {
 		return nil, err
@@ -32,7 +30,7 @@ func loadAndExport(env *env) ([]*Collection, error) {
 		}
 	}
 
-	collections := []*Collection{}
+	collections := []*collection{}
 	for collection, err := range listCollections(tx) {
 		if err != nil {
 			return nil, err
@@ -49,45 +47,7 @@ func loadAndExport(env *env) ([]*Collection, error) {
 	return collections, nil
 }
 
-func main() {
-	val := reflect.ValueOf(&Item{})
-	typ := val.Type()
-	for i := 0; i < typ.NumMethod(); i++ {
-		methtype := typ.Method(i)
-		method := val.Method(i)
-		t := method.Type()
-
-		// only track valid methods must return *Error as last arg
-		// and must be exported
-		if t.NumOut() == 0 ||
-			t.Out(t.NumOut()-1) != reflect.TypeOf(&dbus.ErrMsgInvalidArg) ||
-			methtype.PkgPath != "" {
-			continue
-		}
-	}
-
-	// TODO
-	dbpath := "file:./data.db"
-
-	db, err := openDb(dbpath)
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-
-	sessions := make(map[dbus.ObjectPath]*Session)
-
-	conn, err := dbus.SessionBus()
-	if err != nil {
-		panic(err)
-	}
-
-	env := &env{
-		sessions: sessions,
-		db:       db,
-		conn:     conn,
-	}
-
+func Start(env *Env) error {
 	collections, err := loadAndExport(env)
 	if err != nil {
 		panic(err)
@@ -99,7 +59,7 @@ func main() {
 		panic(err)
 	}
 
-	var defaultCollection *Collection
+	var defaultCollection *collection
 	for _, c := range collections {
 		if c.id != 1 {
 			continue
@@ -113,12 +73,12 @@ func main() {
 		panic("no default")
 	}
 
-	err = conn.Export(defaultCollection, "/org/freedesktop/secrets/aliases/default", "org.freedesktop.Secret.Collection")
+	err = env.conn.Export(defaultCollection, "/org/freedesktop/secrets/aliases/default", "org.freedesktop.Secret.Collection")
 	if err != nil {
 		panic(err)
 	}
 
-	reply, err := conn.RequestName("org.freedesktop.secrets", dbus.NameFlagDoNotQueue)
+	reply, err := env.conn.RequestName("org.freedesktop.secrets", dbus.NameFlagDoNotQueue)
 	if err != nil {
 		panic(err)
 	}
@@ -126,5 +86,5 @@ func main() {
 		panic("name already owned")
 	}
 
-	select {}
+	return nil
 }

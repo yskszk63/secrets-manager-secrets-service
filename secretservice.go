@@ -1,4 +1,4 @@
-package main
+package smss
 
 import (
 	"fmt"
@@ -9,12 +9,12 @@ import (
 )
 
 type SecretService struct {
-	env         *env
+	env         *Env
 	seq         int
-	collections []*Collection
+	collections []*collection
 }
 
-func newSecretService(env *env, collections []*Collection) *SecretService {
+func newSecretService(env *Env, collections []*collection) *SecretService {
 	return &SecretService{
 		env:         env,
 		collections: collections,
@@ -129,7 +129,7 @@ func (s *SecretService) Lock(objects []dbus.ObjectPath) ([]dbus.ObjectPath, *dbu
 	return nil, nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }
 
-func (s *SecretService) GetSecrets(items []dbus.ObjectPath, session dbus.ObjectPath) (map[dbus.ObjectPath]Secret, *dbus.Error) {
+func (s *SecretService) GetSecrets(items []dbus.ObjectPath, session dbus.ObjectPath) (map[dbus.ObjectPath]secret, *dbus.Error) {
 	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }
 

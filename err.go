@@ -1,4 +1,4 @@
-package main
+package smss
 
 import "github.com/godbus/dbus/v5"
 

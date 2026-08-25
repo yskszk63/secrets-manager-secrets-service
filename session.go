@@ -1,4 +1,4 @@
-package main
+package smss
 
 import (
 	"fmt"
@@ -9,13 +9,13 @@ import (
 )
 
 type Session struct {
-	env  *env
+	env  *Env
 	id   int
 	path dbus.ObjectPath
 	key  []byte
 }
 
-func newSession(env *env, id int, key []byte) *Session {
+func newSession(env *Env, id int, key []byte) *Session {
 	path := dbus.ObjectPath(fmt.Sprintf(
 		"/org/freedesktop/secrets/session/%d", id))
 	return &Session{

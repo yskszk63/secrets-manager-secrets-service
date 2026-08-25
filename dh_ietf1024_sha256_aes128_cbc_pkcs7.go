@@ -1,5 +1,5 @@
 // copy from https://github.com/keybase/go-keychain/blob/a5895cfaa36bd26f9220f96f36b743d41fdd1e92/secretservice/dh_ietf1024_sha256_aes128_cbc_pkcs7.go
-package main
+package smss
 
 // This file implements a basic Diffie-Hellman for groups with modular
 // exponentiation operators. In particular, it is used in this package

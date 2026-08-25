@@ -1,4 +1,4 @@
-package main
+package smss
 
 import (
 	"database/sql"
@@ -36,6 +36,19 @@ func runMigrate(db *sql.DB, name string, version int, current *int) error {
 	}
 
 	if _, err := db.Exec("PRAGMA user_version = " + strconv.Itoa(version)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func Migrate(db *sql.DB) error {
+	var version int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		return err
+	}
+
+	if err := runMigrate(db, "001-initial.sql", 1, &version); err != nil {
 		return err
 	}
 
@@ -290,22 +303,4 @@ func searchItems(tx *sql.Tx, attributes map[string]string) iter.Seq2[*dbItemKey,
 			yield(nil, err)
 		}
 	}
-}
-
-func openDb(dsn string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, err
-	}
-
-	var version int
-	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
-		return nil, err
-	}
-
-	if err := runMigrate(db, "001-initial.sql", 1, &version); err != nil {
-		return nil, err
-	}
-
-	return db, nil
 }
