@@ -1,6 +1,8 @@
 package smss
 
 import (
+	"fmt"
+
 	"github.com/godbus/dbus/v5"
 )
 
@@ -50,13 +52,13 @@ func loadAndExport(env *Env) ([]*collection, error) {
 func Start(env *Env) error {
 	collections, err := loadAndExport(env)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	service := newSecretService(env, collections)
 
 	if err = service.export(); err != nil {
-		panic(err)
+		return err
 	}
 
 	var defaultCollection *collection
@@ -75,15 +77,15 @@ func Start(env *Env) error {
 
 	err = env.conn.Export(defaultCollection, "/org/freedesktop/secrets/aliases/default", "org.freedesktop.Secret.Collection")
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	reply, err := env.conn.RequestName("org.freedesktop.secrets", dbus.NameFlagDoNotQueue)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	if reply != dbus.RequestNameReplyPrimaryOwner {
-		panic("name already owned")
+		return fmt.Errorf("name already owned")
 	}
 
 	return nil

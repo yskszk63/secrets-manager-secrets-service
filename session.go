@@ -8,25 +8,67 @@ import (
 	"github.com/godbus/dbus/v5/prop"
 )
 
-type Session struct {
-	env  *Env
-	id   int
-	path dbus.ObjectPath
-	key  []byte
+type algorithm interface {
+	encrypt(dbus.ObjectPath, []byte) (*secret, error)
+	decrypt(*secret) ([]byte, error)
 }
 
-func newSession(env *Env, id int, key []byte) *Session {
+type algPlain struct {
+}
+
+func (a *algPlain) encrypt(session dbus.ObjectPath, data []byte) (*secret, error) {
+	return &secret{
+		Session:     session,
+		Parameters:  []byte{},
+		Value:       data,
+		ContentType: "", // TODO
+	}, nil
+}
+
+func (a *algPlain) decrypt(secret *secret) ([]byte, error) {
+	return secret.Value, nil
+}
+
+type algDhIetf1024Sha256Aes128CbcPkcs7 struct {
+	key []byte
+}
+
+func (a *algDhIetf1024Sha256Aes128CbcPkcs7) encrypt(session dbus.ObjectPath, data []byte) (*secret, error) {
+	iv, value, err := unauthenticatedAESCBCEncrypt(data, a.key)
+	if err != nil {
+		return nil, err
+	}
+	return &secret{
+		Session:     session,
+		Parameters:  iv,
+		Value:       value,
+		ContentType: "",
+	}, nil
+}
+
+func (a *algDhIetf1024Sha256Aes128CbcPkcs7) decrypt(secret *secret) ([]byte, error) {
+	return unauthenticatedAESCBCDecrypt(secret.Parameters, secret.Value, a.key)
+}
+
+type session struct {
+	env       *Env
+	id        int
+	path      dbus.ObjectPath
+	algorithm algorithm
+}
+
+func newSession(env *Env, id int, algorithm algorithm) *session {
 	path := dbus.ObjectPath(fmt.Sprintf(
 		"/org/freedesktop/secrets/session/%d", id))
-	return &Session{
-		env:  env,
-		id:   id,
-		path: path,
-		key:  key,
+	return &session{
+		env:       env,
+		id:        id,
+		path:      path,
+		algorithm: algorithm,
 	}
 }
 
-func (s *Session) export() error {
+func (s *session) export() error {
 	mappingSession := map[string]string{
 		"Close": "Close",
 	}
@@ -48,9 +90,17 @@ func (s *Session) export() error {
 	return nil
 }
 
+func (s *session) encrypt(data []byte) (*secret, error) {
+	return s.algorithm.encrypt(s.path, data)
+}
+
+func (s *session) decrypt(secret *secret) ([]byte, error) {
+	return s.algorithm.decrypt(secret)
+}
+
 // org.freedesktop.Secret.Session
 
-func (s *Session) Close() error {
+func (s *session) Close() error {
 	delete(s.env.sessions, s.path)
 	// TODO really??
 	if err := s.env.conn.Export(nil, s.path, "org.freedesktop.Secret.Session"); err != nil {
@@ -63,14 +113,14 @@ func (s *Session) Close() error {
 
 // org.freedesktop.DBus.Properties
 
-func (s *Session) Get(iface, name string) (*dbus.Variant, *dbus.Error) {
+func (s *session) Get(iface, name string) (*dbus.Variant, *dbus.Error) {
 	return nil, prop.ErrIfaceNotFound
 }
 
-func (s *Session) Set(iface, name string, value dbus.Variant) *dbus.Error {
+func (s *session) Set(iface, name string, value dbus.Variant) *dbus.Error {
 	return prop.ErrIfaceNotFound
 }
 
-func (s *Session) GetAll(iface string) (map[string]dbus.Variant, *dbus.Error) {
+func (s *session) GetAll(iface string) (map[string]dbus.Variant, *dbus.Error) {
 	return nil, prop.ErrIfaceNotFound
 }

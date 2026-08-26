@@ -62,7 +62,7 @@ func (s *collection) CreateItem(properties map[string]dbus.Variant, secret secre
 		return nil, nil, errNoSession
 	}
 
-	sec, err := unauthenticatedAESCBCDecrypt(secret.Parameters, secret.Value, session.key)
+	sec, err := session.decrypt(&secret)
 	if err != nil {
 		return nil, nil, dbus.MakeFailedError(err)
 	}
@@ -79,6 +79,13 @@ func (s *collection) CreateItem(properties map[string]dbus.Variant, secret secre
 	}
 	label := labelv.Value().(string)
 
+	tx, err := s.env.db.Begin()
+	if err != nil {
+		log.Println(err)
+		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+	defer tx.Rollback()
+
 	dbItem := dbItem{
 		collectionId: &s.id,
 		// TODO encrypt
@@ -87,23 +94,45 @@ func (s *collection) CreateItem(properties map[string]dbus.Variant, secret secre
 		attributes: attr,
 	}
 
-	tx, err := s.env.db.Begin()
-	if err != nil {
-		log.Println(err)
-		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	if replace {
+		for item, err := range searchItems(tx, attr) {
+			if err != nil {
+				log.Println(err)
+				return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+			}
+
+			if *dbItem.collectionId != *item.collectionId {
+				continue
+			}
+
+			dbItem.id = item.id
+			break
+		}
 	}
-	defer tx.Rollback()
 
-	if err := insertItem(tx, &dbItem); err != nil {
-		log.Println(err)
-		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
-	}
+	var path dbus.ObjectPath
+	if dbItem.id == nil {
+		if err := insertItem(tx, &dbItem); err != nil {
+			log.Println(err)
+			return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+		}
 
-	item := newItem(s.env, *dbItem.collectionId, *dbItem.id)
+		item := newItem(s.env, *dbItem.collectionId, *dbItem.id)
 
-	if err := item.export(); err != nil {
-		log.Println(err)
-		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+		if err := item.export(); err != nil {
+			log.Println(err)
+			return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+		}
+
+		path = item.path
+
+	} else {
+		if err := updateItem(tx, &dbItem); err != nil {
+			log.Println(err)
+			return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+		}
+
+		path = newItem(s.env, *dbItem.collectionId, *dbItem.id).path
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -112,7 +141,7 @@ func (s *collection) CreateItem(properties map[string]dbus.Variant, secret secre
 	}
 
 	noPrompt := dbus.ObjectPath("/")
-	return &item.path, &noPrompt, nil
+	return &path, &noPrompt, nil
 }
 
 // org.freedesktop.DBus.Properties

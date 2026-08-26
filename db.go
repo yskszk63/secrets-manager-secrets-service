@@ -170,6 +170,16 @@ func insertItem(tx *sql.Tx, item *dbItem) error {
 	return nil
 }
 
+func updateItemSecret(tx *sql.Tx, id int64, secret []byte) error {
+	q := "UPDATE item SET secret = ? WHERE id = ?"
+
+	if _, err := tx.Exec(q, secret, id); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func updateItem(tx *sql.Tx, item *dbItem) error {
 	if len(item.attributes) < 1 {
 		return fmt.Errorf("must len(attributes) > 0")

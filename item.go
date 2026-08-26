@@ -51,7 +51,25 @@ func (i *item) export() error {
 // org.freedesktop.Secret.Item
 
 func (i *item) Delete() (*dbus.ObjectPath, *dbus.Error) {
-	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	tx, err := i.env.db.Begin()
+	if err != nil {
+		log.Println(err)
+		return nil, dbus.MakeFailedError(fmt.Errorf("Failure"))
+	}
+	defer tx.Rollback()
+
+	if err := deleteItem(tx, i.id); err != nil {
+		log.Println(err)
+		return nil, dbus.MakeFailedError(fmt.Errorf("Failure"))
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Println(err)
+		return nil, dbus.MakeFailedError(fmt.Errorf("Failure"))
+	}
+
+	prompt := dbus.ObjectPath("/")
+	return &prompt, nil
 }
 
 func (i *item) GetSecret(session dbus.ObjectPath) (*secret, *dbus.Error) {
@@ -73,24 +91,45 @@ func (i *item) GetSecret(session dbus.ObjectPath) (*secret, *dbus.Error) {
 		return nil, dbus.MakeFailedError(fmt.Errorf("Failure"))
 	}
 
-	iv, cipherText, err := unauthenticatedAESCBCEncrypt(dbItem.secret, s.key)
+	secret, err := s.encrypt(dbItem.secret)
 	if err != nil {
 		log.Println(err)
 		return nil, dbus.MakeFailedError(fmt.Errorf("Failure"))
 	}
 
-	secret := secret{
-		Session:     session,
-		Parameters:  iv,
-		Value:       cipherText,
-		ContentType: "text/plain", // TODO
-	}
-
-	return &secret, nil
+	return secret, nil
 }
 
 func (i *item) SetSecret(secret *secret) *dbus.Error {
-	return dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	s, ok := i.env.sessions[secret.Session]
+	if !ok {
+		return errNoSession
+	}
+
+	tx, err := i.env.db.Begin()
+	if err != nil {
+		log.Println(err)
+		return dbus.MakeFailedError(fmt.Errorf("Failure"))
+	}
+	defer tx.Rollback()
+
+	data, err := s.decrypt(secret)
+	if err != nil {
+		log.Println(err)
+		return dbus.MakeFailedError(fmt.Errorf("Failure"))
+	}
+
+	if err := updateItemSecret(tx, i.id, data); err != nil {
+		log.Println(err)
+		return dbus.MakeFailedError(fmt.Errorf("Failure"))
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Println(err)
+		return dbus.MakeFailedError(fmt.Errorf("Failure"))
+	}
+
+	return nil
 }
 
 // org.freedesktop.DBus.Properties

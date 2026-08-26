@@ -53,46 +53,60 @@ func (s *SecretService) export() error {
 
 // org.freedesktop.Secret.Service
 
-func (s *SecretService) OpenSession(algorithm string, input dbus.Variant) (*dbus.Variant, *dbus.ObjectPath, *dbus.Error) {
-	if algorithm != "dh-ietf1024-sha256-aes128-cbc-pkcs7" {
+func (s *SecretService) OpenSession(algorithmName string, input dbus.Variant) (*dbus.Variant, *dbus.ObjectPath, *dbus.Error) {
+	var alg algorithm
+	var output *dbus.Variant
+
+	switch algorithmName {
+	case "plain":
+		alg = new(algPlain)
+		output = new(dbus.MakeVariant(""))
+
+	case "dh-ietf1024-sha256-aes128-cbc-pkcs7":
+		if input.Signature().String() != "ay" {
+			return nil, nil, &dbus.ErrMsgInvalidArg
+		}
+
+		b, ok := input.Value().([]byte)
+		if !ok {
+			return nil, nil, &dbus.ErrMsgInvalidArg
+		}
+
+		g := rfc2409SecondOakleyGroup()
+		myPrivate, myPublic, err := g.NewKeypair()
+		if err != nil {
+			log.Println(err)
+			return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+		}
+		theirPublic := new(big.Int).SetBytes(b)
+		key, err := g.keygenHKDFSHA256AES128(theirPublic, myPrivate)
+		if err != nil {
+			log.Println(err)
+			return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+		}
+
+		alg = &algDhIetf1024Sha256Aes128CbcPkcs7{
+			key: key,
+		}
+
+		b2 := make([]byte, 128)
+		myPublic.FillBytes(b2)
+		output = new(dbus.MakeVariant(b2))
+
+	default:
 		return nil, nil, dbus.MakeFailedError(fmt.Errorf("Not implemented"))
 	}
-	if input.Signature().String() != "ay" {
-		return nil, nil, &dbus.ErrMsgInvalidArg
-	}
-
-	b, ok := input.Value().([]byte)
-	if !ok {
-		return nil, nil, &dbus.ErrMsgInvalidArg
-	}
-
-	g := rfc2409SecondOakleyGroup()
-	myPrivate, myPublic, err := g.NewKeypair()
-	if err != nil {
-		log.Println(err)
-		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
-	}
-	theirPublic := new(big.Int).SetBytes(b)
-	key, err := g.keygenHKDFSHA256AES128(theirPublic, myPrivate)
-	if err != nil {
-		log.Println(err)
-		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
-	}
-
-	b2 := make([]byte, 128)
-	myPublic.FillBytes(b2)
-	o := dbus.MakeVariant(b2)
 
 	s.seq += 1
 
-	session := newSession(s.env, s.seq, key)
+	session := newSession(s.env, s.seq, alg)
 	if err := session.export(); err != nil {
 		log.Println(err)
 		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
 	}
 	s.env.sessions[session.path] = session
 
-	return &o, &session.path, nil
+	return output, &session.path, nil
 }
 
 func (s *SecretService) CreateCollection(properties map[string]dbus.Variant, alias string) (*dbus.ObjectPath, *dbus.ObjectPath, *dbus.Error) {
