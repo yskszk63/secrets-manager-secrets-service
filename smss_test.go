@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"database/sql"
 	"fmt"
+	"maps"
 	"os/exec"
 	"slices"
 	"testing"
@@ -108,6 +109,26 @@ func searchItems(t testing.TB, conn *dbus.Conn, attrs map[string]string) []dbus.
 	return unlocked
 }
 
+func getSecrets(t testing.TB, conn *dbus.Conn, items []dbus.ObjectPath, session dbus.ObjectPath) map[dbus.ObjectPath]string {
+	var results map[dbus.ObjectPath]secret
+
+	secretService := conn.Object("org.freedesktop.secrets", "/org/freedesktop/secrets")
+	call := secretService.Call("org.freedesktop.Secret.Service.GetSecrets", 0, items, session)
+
+	err := call.Store(&results)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	extracted := make(map[dbus.ObjectPath]string, len(results))
+	for key, val := range results {
+		extracted[key] = string(val.Value)
+	}
+
+	return extracted
+}
+
+
 func createItem(t testing.TB, conn *dbus.Conn, session dbus.ObjectPath, props map[string]dbus.Variant, data []byte, replace bool) dbus.ObjectPath {
 	var item dbus.ObjectPath
 	var prompt dbus.ObjectPath
@@ -207,6 +228,16 @@ func TestSmss(t *testing.T) {
 	}
 	item3 := createItem(t, conn, session, props3, []byte("OK3"), true)
 	_ = item3
+
+	items := getSecrets(t, conn, []dbus.ObjectPath{ item1, item2, item3 }, session)
+	expected := map[dbus.ObjectPath]string {
+		item1: "OK!",
+		item2: "OK2",
+		item3: "OK3",
+	}
+	if !maps.Equal(items, expected) {
+		t.Fatal()
+	}
 
 	attrs := map[string]string{
 		"a": "1",

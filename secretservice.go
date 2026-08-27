@@ -143,8 +143,36 @@ func (s *SecretService) Lock(objects []dbus.ObjectPath) ([]dbus.ObjectPath, *dbu
 	return nil, nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }
 
-func (s *SecretService) GetSecrets(items []dbus.ObjectPath, session dbus.ObjectPath) (map[dbus.ObjectPath]secret, *dbus.Error) {
-	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+func (s *SecretService) GetSecrets(items []dbus.ObjectPath, sessionPath dbus.ObjectPath) (map[dbus.ObjectPath]*secret, *dbus.Error) {
+	tx, err := s.env.db.Begin()
+	if err != nil {
+		log.Println(err)
+		return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+	defer tx.Rollback()
+
+	sessionobj, found := s.env.sessions[sessionPath]
+	if !found {
+		return nil, errNoSession
+	}
+
+	results := make(map[dbus.ObjectPath]*secret, len(items))
+	for _, item := range items {
+		dbItem, err := findItemByPath(tx, string(item))
+		if err != nil {
+			log.Println(err)
+			return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+		}
+
+		s, err := sessionobj.encrypt(dbItem.secret)
+		if err != nil {
+			log.Println(err)
+			return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+		}
+		results[item] = s
+	}
+
+	return results, nil
 }
 
 func (s *SecretService) ReadAlias(name string) (*dbus.ObjectPath, *dbus.Error) {

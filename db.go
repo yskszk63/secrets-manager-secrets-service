@@ -123,6 +123,17 @@ func findCollection(tx *sql.Tx, id int64) (*dbCollection, error) {
 	return &r, nil
 }
 
+func findCollectionByPath(tx *sql.Tx, path string) (*dbCollection, error) {
+	q := "SELECT id, label, created, modified FROM collection WHERE path = ?"
+
+	var r dbCollection
+	if err := tx.QueryRow(q, path).Scan(&r.id, &r.label, &r.created, &r.modified); err != nil {
+		return nil, err
+	}
+
+	return &r, nil
+}
+
 func listCollections(tx *sql.Tx) iter.Seq2[*dbCollectionKey, error] {
 	return func(yield func(*dbCollectionKey, error) bool) {
 		q := "SELECT id FROM collection ORDER BY id ASC"
@@ -255,6 +266,23 @@ func getItem(tx *sql.Tx, id int64) (*dbItem, error) {
 	var b []byte
 
 	if err := tx.QueryRow(q, id).Scan(&item.id, &item.collectionId, &item.secret, &item.label, &item.created, &item.modified, &b); err != nil {
+		return nil, err
+	}
+
+	if err := json.Unmarshal(b, &item.attributes); err != nil {
+		return nil, err
+	}
+
+	return &item, nil
+}
+
+func findItemByPath(tx *sql.Tx, path string) (*dbItem, error) {
+	q := "SELECT id, collection_id, secret, label, created, modified, (SELECT json_group_object(a.key, a.value) FROM item_attr a WHERE a.item_id = i.id) FROM item i WHERE i.path = ?"
+
+	var item dbItem
+	var b []byte
+
+	if err := tx.QueryRow(q, path).Scan(&item.id, &item.collectionId, &item.secret, &item.label, &item.created, &item.modified, &b); err != nil {
 		return nil, err
 	}
 
