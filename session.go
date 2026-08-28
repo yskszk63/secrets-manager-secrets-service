@@ -21,7 +21,7 @@ func (a *algPlain) encrypt(session dbus.ObjectPath, data []byte) (*secret, error
 		Session:     session,
 		Parameters:  []byte{},
 		Value:       data,
-		ContentType: "", // TODO
+		ContentType: "text/plain",
 	}, nil
 }
 
@@ -42,7 +42,7 @@ func (a *algDhIetf1024Sha256Aes128CbcPkcs7) encrypt(session dbus.ObjectPath, dat
 		Session:     session,
 		Parameters:  iv,
 		Value:       value,
-		ContentType: "",
+		ContentType: "text/plain",
 	}, nil
 }
 

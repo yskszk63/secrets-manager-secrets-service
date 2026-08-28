@@ -9,15 +9,13 @@ import (
 )
 
 type SecretService struct {
-	env         *Env
-	seq         int
-	collections []*collection
+	env *Env
+	seq int
 }
 
-func newSecretService(env *Env, collections []*collection) *SecretService {
+func newSecretService(env *Env) *SecretService {
 	return &SecretService{
-		env:         env,
-		collections: collections,
+		env: env,
 	}
 }
 
@@ -122,14 +120,13 @@ func (s *SecretService) SearchItems(attributes map[string]string) ([]dbus.Object
 	defer tx.Rollback()
 
 	paths := []dbus.ObjectPath{}
-	for item, err := range searchItems(tx, attributes) {
+	for path, err := range searchItems(tx, attributes) {
 		if err != nil {
 			log.Println(err)
 			return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
 		}
 
-		path := dbus.ObjectPath(fmt.Sprintf("/org/freedesktop/secrets/collection/%d/%d", *item.collectionId, *item.id))
-		paths = append(paths, path)
+		paths = append(paths, dbus.ObjectPath(*path))
 	}
 
 	return paths, []dbus.ObjectPath{}, nil
@@ -186,13 +183,54 @@ func (s *SecretService) SetAlias(name string, collection dbus.ObjectPath) *dbus.
 // org.freedesktop.DBus.Properties
 
 func (s *SecretService) Get(iface, name string) (*dbus.Variant, *dbus.Error) {
-	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	switch iface {
+	case "org.freedesktop.Secret.Service":
+		switch name {
+		case "Collections":
+			tx, err := s.env.db.Begin()
+			if err != nil {
+				log.Println(err)
+				return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+			}
+			defer tx.Rollback()
+
+			paths := make([]*dbus.ObjectPath, 0)
+			for path, err := range listCollectionPaths(tx) {
+				if err != nil {
+					log.Println(err)
+					return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+				}
+				paths = append(paths, new(dbus.ObjectPath(*path)))
+			}
+
+			return new(dbus.MakeVariant(paths)), nil
+
+		default:
+			return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+		}
+
+	default:
+		return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	}
 }
 
 func (s *SecretService) Set(iface, name string, value dbus.Variant) *dbus.Error {
 	return dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }
 
-func (s *SecretService) GetAll(iface string) (map[string]dbus.Variant, *dbus.Error) {
-	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+func (s *SecretService) GetAll(iface string) (map[string]*dbus.Variant, *dbus.Error) {
+	switch iface {
+	case "org.freedesktop.Secret.Service":
+		collections, err := s.Get(iface, "Collections")
+		if err != nil {
+			return nil, err
+		}
+
+		return map[string]*dbus.Variant{
+			"Collections": collections,
+		}, nil
+
+	default:
+		return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	}
 }

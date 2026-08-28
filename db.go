@@ -55,88 +55,66 @@ func Migrate(db *sql.DB) error {
 	return nil
 }
 
-type dbCollectionKey struct {
-	id *int64
-}
-
 type dbCollection struct {
-	dbCollectionKey
+	path     *string
 	label    *string
 	created  *string
 	modified *string
 }
 
-type dbItemKey struct {
-	id           *int64
-	collectionId *int64
-}
-
 type dbItem struct {
-	dbItemKey
-	secret     []byte
-	label      *string
-	created    *string
-	modified   *string
-	attributes map[string]string
+	collectionPath *string
+	path           *string
+	secret         []byte
+	label          *string
+	created        *string
+	modified       *string
+	attributes     map[string]string
 }
 
 func insertCollection(tx *sql.Tx, collection *dbCollection) error {
-	q := "INSERT INTO collection (label) VALUES (?) RETURNING id"
+	q := "INSERT INTO collection (label) VALUES (?) RETURNING path"
 
-	if err := tx.QueryRow(q, collection.label).Scan(&collection.id); err != nil {
+	if err := tx.QueryRow(q, collection.label).Scan(&collection.path); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func deleteCollection(tx *sql.Tx, id int64) error {
-	q := "DELETE FROM collection WHERE id = ?"
-
-	if _, err := tx.Exec(q, id); err != nil {
+func deleteCollection(tx *sql.Tx, path string) error {
+	q2 := "DELETE FROM item_attr WHERE item_id IN (SELECT id FROM item where collection_id IN (SELECT id FROM collection WHERE path = ?))"
+	if _, err := tx.Exec(q2, path); err != nil {
 		return err
 	}
 
-	q2 := "DELETE FROM item_attr WHERE item_id IN (SELECT id FROM item where collection_id = ?)"
-
-	if _, err := tx.Exec(q2, id); err != nil {
+	q3 := "DELETE FROM item WHERE collection_id IN (SELECT id FROM collection WHERE path = ?)"
+	if _, err := tx.Exec(q3, path); err != nil {
 		return err
 	}
 
-	q3 := "DELETE FROM item WHERE collection_id = ?"
-
-	if _, err := tx.Exec(q3, id); err != nil {
+	q := "DELETE FROM collection WHERE id = path"
+	if _, err := tx.Exec(q, path); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func findCollection(tx *sql.Tx, id int64) (*dbCollection, error) {
-	q := "SELECT id, label, created, modified FROM collection WHERE id = ?"
+func findCollection(tx *sql.Tx, path string) (*dbCollection, error) {
+	q := "SELECT path, label, created, modified FROM collection WHERE path = ?"
 
 	var r dbCollection
-	if err := tx.QueryRow(q, id).Scan(&r.id, &r.label, &r.created, &r.modified); err != nil {
+	if err := tx.QueryRow(q, path).Scan(&r.path, &r.label, &r.created, &r.modified); err != nil {
 		return nil, err
 	}
 
 	return &r, nil
 }
 
-func findCollectionByPath(tx *sql.Tx, path string) (*dbCollection, error) {
-	q := "SELECT id, label, created, modified FROM collection WHERE path = ?"
-
-	var r dbCollection
-	if err := tx.QueryRow(q, path).Scan(&r.id, &r.label, &r.created, &r.modified); err != nil {
-		return nil, err
-	}
-
-	return &r, nil
-}
-
-func listCollections(tx *sql.Tx) iter.Seq2[*dbCollectionKey, error] {
-	return func(yield func(*dbCollectionKey, error) bool) {
-		q := "SELECT id FROM collection ORDER BY id ASC"
+func listCollections(tx *sql.Tx) iter.Seq2[*string, error] {
+	return func(yield func(*string, error) bool) {
+		q := "SELECT path FROM collection ORDER BY id ASC"
 
 		rows, err := tx.Query(q)
 		if err != nil {
@@ -146,8 +124,37 @@ func listCollections(tx *sql.Tx) iter.Seq2[*dbCollectionKey, error] {
 		defer rows.Close()
 
 		for rows.Next() {
-			var r dbCollectionKey
-			if err := rows.Scan(&r.id); err != nil {
+			var r string
+			if err := rows.Scan(&r); err != nil {
+				yield(nil, err)
+				return
+			}
+
+			if !yield(&r, nil) {
+				return
+			}
+		}
+
+		if err := rows.Err(); err != nil {
+			yield(nil, err)
+		}
+	}
+}
+
+func listCollectionPaths(tx *sql.Tx) iter.Seq2[*string, error] {
+	return func(yield func(*string, error) bool) {
+		q := "SELECT path FROM collection ORDER BY id ASC"
+
+		rows, err := tx.Query(q)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var r string
+			if err := rows.Scan(&r); err != nil {
 				yield(nil, err)
 				return
 			}
@@ -168,23 +175,23 @@ func insertItem(tx *sql.Tx, item *dbItem) error {
 		return fmt.Errorf("must len(attributes) > 0")
 	}
 
-	q := "INSERT INTO item(collection_id, secret, label) VALUES (?, ?, ?) RETURNING id, created, modified"
+	q := "INSERT INTO item(collection_id, secret, label) VALUES ((SELECT id FROM collection WHERE path = ?), ?, ?) RETURNING path, created, modified"
 
-	if err := tx.QueryRow(q, item.collectionId, item.secret, item.label).Scan(&item.id, &item.created, &item.modified); err != nil {
+	if err := tx.QueryRow(q, item.collectionPath, item.secret, item.label).Scan(&item.path, &item.created, &item.modified); err != nil {
 		return err
 	}
 
-	if err := insertItemAttr(tx, *item.id, item.attributes); err != nil {
+	if err := insertItemAttr(tx, *item.path, item.attributes); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func updateItemSecret(tx *sql.Tx, id int64, secret []byte) error {
-	q := "UPDATE item SET secret = ? WHERE id = ?"
+func updateItemSecret(tx *sql.Tx, path string, secret []byte) error {
+	q := "UPDATE item SET secret = ? WHERE path = ?"
 
-	if _, err := tx.Exec(q, secret, id); err != nil {
+	if _, err := tx.Exec(q, secret, path); err != nil {
 		return err
 	}
 
@@ -196,42 +203,40 @@ func updateItem(tx *sql.Tx, item *dbItem) error {
 		return fmt.Errorf("must len(attributes) > 0")
 	}
 
-	q := "UPDATE item SET secret = ?, label = ? WHERE id = ? RETURNING modified"
+	q := "UPDATE item SET secret = ?, label = ? WHERE path = ? RETURNING modified"
 
-	if err := tx.QueryRow(q, item.secret, item.label, item.id).Scan(&item.modified); err != nil {
+	if err := tx.QueryRow(q, item.secret, item.label, item.path).Scan(&item.modified); err != nil {
 		return err
 	}
 
-	q2 := "DELETE FROM item_attr WHERE item_id = ?"
+	q2 := "DELETE FROM item_attr WHERE item_id IN (SELECT id FROM item WHERE path = ?)"
 
-	if _, err := tx.Exec(q2, *item.id); err != nil {
+	if _, err := tx.Exec(q2, item.path); err != nil {
 		return err
 	}
 
-	if err := insertItemAttr(tx, *item.id, item.attributes); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func deleteItem(tx *sql.Tx, id int64) error {
-	q := "DELETE FROM item WHERE id = ?"
-
-	if _, err := tx.Exec(q, id); err != nil {
-		return err
-	}
-
-	q2 := "DELETE FROM item_attr WHERE item_id = ?"
-
-	if _, err := tx.Exec(q2, id); err != nil {
+	if err := insertItemAttr(tx, *item.path, item.attributes); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func insertItemAttr(tx *sql.Tx, itemId int64, attributes map[string]string) error {
+func deleteItem(tx *sql.Tx, path string) error {
+	q2 := "DELETE FROM item_attr WHERE item_id IN (SELECT id FROM item WHERE path = ?)"
+	if _, err := tx.Exec(q2, path); err != nil {
+		return err
+	}
+
+	q := "DELETE FROM item WHERE path = ?"
+	if _, err := tx.Exec(q, path); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func insertItemAttr(tx *sql.Tx, path string, attributes map[string]string) error {
 	if len(attributes) < 1 {
 		return fmt.Errorf("must len(attributes) > 0")
 	}
@@ -242,7 +247,7 @@ func insertItemAttr(tx *sql.Tx, itemId int64, attributes map[string]string) erro
 	}
 	sort.Strings(keys)
 
-	q := "INSERT INTO item_attr(item_id, key, value) VALUES (?, ?, ?)"
+	q := "INSERT INTO item_attr(item_id, key, value) VALUES ((SELECT id FROM item WHERE path = ?), ?, ?)"
 	stmt, err := tx.Prepare(q)
 	if err != nil {
 		return err
@@ -251,7 +256,7 @@ func insertItemAttr(tx *sql.Tx, itemId int64, attributes map[string]string) erro
 
 	for _, key := range keys {
 		val := attributes[key]
-		if _, err := stmt.Exec(itemId, key, val); err != nil {
+		if _, err := stmt.Exec(path, key, val); err != nil {
 			return err
 		}
 	}
@@ -259,30 +264,13 @@ func insertItemAttr(tx *sql.Tx, itemId int64, attributes map[string]string) erro
 	return nil
 }
 
-func getItem(tx *sql.Tx, id int64) (*dbItem, error) {
-	q := "SELECT id, collection_id, secret, label, created, modified, (SELECT json_group_object(a.key, a.value) FROM item_attr a WHERE a.item_id = i.id) FROM item i WHERE i.id = ?"
-
-	var item dbItem
-	var b []byte
-
-	if err := tx.QueryRow(q, id).Scan(&item.id, &item.collectionId, &item.secret, &item.label, &item.created, &item.modified, &b); err != nil {
-		return nil, err
-	}
-
-	if err := json.Unmarshal(b, &item.attributes); err != nil {
-		return nil, err
-	}
-
-	return &item, nil
-}
-
 func findItemByPath(tx *sql.Tx, path string) (*dbItem, error) {
-	q := "SELECT id, collection_id, secret, label, created, modified, (SELECT json_group_object(a.key, a.value) FROM item_attr a WHERE a.item_id = i.id) FROM item i WHERE i.path = ?"
+	q := "SELECT path, collection_path, secret, label, created, modified, (SELECT json_group_object(a.key, a.value) FROM item_attr a WHERE a.item_id = i.id) FROM item i WHERE i.path = ?"
 
 	var item dbItem
 	var b []byte
 
-	if err := tx.QueryRow(q, path).Scan(&item.id, &item.collectionId, &item.secret, &item.label, &item.created, &item.modified, &b); err != nil {
+	if err := tx.QueryRow(q, path).Scan(&item.path, &item.collectionPath, &item.secret, &item.label, &item.created, &item.modified, &b); err != nil {
 		return nil, err
 	}
 
@@ -293,9 +281,9 @@ func findItemByPath(tx *sql.Tx, path string) (*dbItem, error) {
 	return &item, nil
 }
 
-func searchItems(tx *sql.Tx, attributes map[string]string) iter.Seq2[*dbItemKey, error] {
-	return func(yield func(*dbItemKey, error) bool) {
-		q := "SELECT id, collection_id FROM item i"
+func searchItems(tx *sql.Tx, attributes map[string]string) iter.Seq2[*string, error] {
+	return func(yield func(*string, error) bool) {
+		q := "SELECT path FROM item i"
 
 		keys := make([]string, 0, len(attributes))
 		for k := range attributes {
@@ -326,14 +314,14 @@ func searchItems(tx *sql.Tx, attributes map[string]string) iter.Seq2[*dbItemKey,
 		defer rows.Close()
 
 		for rows.Next() {
-			var r dbItemKey
+			var path string
 
-			if err := rows.Scan(&r.id, &r.collectionId); err != nil {
+			if err := rows.Scan(&path); err != nil {
 				yield(nil, err)
 				return
 			}
 
-			if !yield(&r, nil) {
+			if !yield(&path, nil) {
 				return
 			}
 		}

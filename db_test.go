@@ -3,6 +3,7 @@ package smss
 import (
 	//"maps"
 	"database/sql"
+	"slices"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -36,16 +37,16 @@ func TestInsertFindCollection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if col.id == nil {
+	if col.path == nil {
 		t.Fatal()
 	}
 
-	c, err := findCollection(tx, *col.id)
+	c, err := findCollection(tx, *col.path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if *c.id != *col.id {
+	if *c.path != *col.path {
 		t.Fatal()
 	}
 	if *c.label != "test" {
@@ -58,7 +59,7 @@ func TestInsertFindCollection(t *testing.T) {
 		t.Fatal()
 	}
 
-	if err := deleteCollection(tx, *col.id); err != nil {
+	if err := deleteCollection(tx, *col.path); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -82,28 +83,28 @@ func TestListCollections(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if *c1.id != 2 {
+	if *c1.path != "/org/freedesktop/secrets/collection/2" {
 		t.Fatal()
 	}
-	if *c2.id != 3 {
+	if *c2.path != "/org/freedesktop/secrets/collection/3" {
 		t.Fatal()
 	}
 
-	wants := map[int64]any{
-		1: struct{}{},
-		2: struct{}{},
-		3: struct{}{},
+	wants := map[string]any{
+		"/org/freedesktop/secrets/collection/1": struct{}{},
+		"/org/freedesktop/secrets/collection/2": struct{}{},
+		"/org/freedesktop/secrets/collection/3": struct{}{},
 	}
-	for c, err := range listCollections(tx) {
+	for p, err := range listCollections(tx) {
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		_, ok := wants[*c.id]
+		_, ok := wants[*p]
 		if !ok {
 			t.Fatal()
 		}
-		delete(wants, *c.id)
+		delete(wants, *p)
 	}
 
 	if len(wants) != 0 {
@@ -121,15 +122,19 @@ func TestItemInsertUpdate(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	attr := map[string]string{
-		"a": "1",
+	item := dbItem{
+		collectionPath: new("/org/freedesktop/secrets/collection/1"),
+		secret:         []byte("secret"),
+		label:          new("ok"),
+		attributes: map[string]string{
+			"a": "1",
+		},
 	}
-	item := dbItem{collectionId: new(int64(1)), secret: []byte("secret"), label: new("ok"), attributes: attr}
 	if err := insertItem(tx, &item); err != nil {
 		t.Fatal(err)
 	}
 
-	if item.id == nil {
+	if item.path == nil {
 		t.Fatal()
 	}
 	if item.created == nil {
@@ -143,7 +148,7 @@ func TestItemInsertUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := deleteItem(tx, *item.id); err != nil {
+	if err := deleteItem(tx, *item.path); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -159,9 +164,9 @@ func TestSearchItems(t *testing.T) {
 	defer tx.Rollback()
 
 	item1 := dbItem{
-		collectionId: new(int64(1)),
-		secret:       []byte("secret1"),
-		label:        new("item1"),
+		collectionPath: new("/org/freedesktop/secrets/collection/1"),
+		secret:         []byte("secret1"),
+		label:          new("item1"),
 		attributes: map[string]string{
 			"a": "1",
 			"b": "2",
@@ -173,9 +178,9 @@ func TestSearchItems(t *testing.T) {
 	}
 
 	item2 := dbItem{
-		collectionId: new(int64(1)),
-		secret:       []byte("secret2"),
-		label:        new("item2"),
+		collectionPath: new("/org/freedesktop/secrets/collection/1"),
+		secret:         []byte("secret2"),
+		label:          new("item2"),
 		attributes: map[string]string{
 			"a": "1",
 			"b": "2",
@@ -186,9 +191,9 @@ func TestSearchItems(t *testing.T) {
 	}
 
 	item3 := dbItem{
-		collectionId: new(int64(1)),
-		secret:       []byte("secret3"),
-		label:        new("item3"),
+		collectionPath: new("/org/freedesktop/secrets/collection/1"),
+		secret:         []byte("secret3"),
+		label:          new("item3"),
 		attributes: map[string]string{
 			"a": "2",
 		},
@@ -197,59 +202,33 @@ func TestSearchItems(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	result := []string{}
+
 	attr := map[string]string{
 		"a": "1",
 		"b": "2",
 	}
-	var i int
-	for item, err := range searchItems(tx, attr) {
+	for path, err := range searchItems(tx, attr) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		switch i {
-		case 0:
-			if *item1.id != *item.id {
-				t.Fatal()
-			}
-		case 1:
-			if *item2.id != *item.id {
-				t.Fatal()
-			}
-		default:
-			t.Fatal()
-		}
-		i++
-	}
-	if i != 2 {
-		t.Fatalf("%d", i)
+		result = append(result, *path)
 	}
 
-	i = 0
-	for item, err := range searchItems(tx, map[string]string{}) {
+	if !slices.Equal(result, []string{*item1.path, *item2.path}) {
+		t.Fatal()
+	}
+
+	result = []string{}
+	for path, err := range searchItems(tx, map[string]string{}) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		result = append(result, *path)
+	}
 
-		switch i {
-		case 0:
-			if *item1.id != *item.id {
-				t.Fatal()
-			}
-		case 1:
-			if *item2.id != *item.id {
-				t.Fatal()
-			}
-		case 2:
-			if *item3.id != *item.id {
-				t.Fatal()
-			}
-		default:
-			t.Fatal()
-		}
-		i++
+	if !slices.Equal(result, []string{*item1.path, *item2.path, *item3.path}) {
+		t.Fatal()
 	}
-	if i != 3 {
-		t.Fatalf("%d", i)
-	}
+
 }

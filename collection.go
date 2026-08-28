@@ -3,33 +3,34 @@ package smss
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/godbus/dbus/v5"
 )
 
 type collection struct {
 	env  *Env
-	id   int64
 	path dbus.ObjectPath
 }
 
-func newCollection(env *Env, id int64) *collection {
-	path := dbus.ObjectPath(fmt.Sprintf("/org/freedesktop/secrets/collection/%d", id))
+func newCollection(env *Env, path string) *collection {
+	if !strings.HasPrefix(path, "/org/freedesktop/secrets/collection/") {
+		panic("Invalid path")
+	}
 	return &collection{
 		env:  env,
-		id:   id,
-		path: path,
+		path: dbus.ObjectPath(path),
 	}
 }
 
-func (c *collection) export() error {
+func (c *collection) exportTo(path dbus.ObjectPath) error {
 	mappingCollection := map[string]string{
 		"Delete":      "Delete",
 		"SearchItems": "SearchItems",
 		"CreateItem":  "CreateItem",
 	}
 
-	if err := c.env.conn.ExportWithMap(c, mappingCollection, c.path, "org.freedesktop.Secret.Collection"); err != nil {
+	if err := c.env.conn.ExportWithMap(c, mappingCollection, path, "org.freedesktop.Secret.Collection"); err != nil {
 		return err
 	}
 
@@ -39,11 +40,15 @@ func (c *collection) export() error {
 		"GetAll": "GetAll",
 	}
 
-	if err := c.env.conn.ExportWithMap(c, mappingProperties, c.path, "org.freedesktop.DBus.Properties"); err != nil {
+	if err := c.env.conn.ExportWithMap(c, mappingProperties, path, "org.freedesktop.DBus.Properties"); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (c *collection) export() error {
+	return c.exportTo(c.path)
 }
 
 // org.freedesktop.Secret.Collection
@@ -87,7 +92,7 @@ func (s *collection) CreateItem(properties map[string]dbus.Variant, secret secre
 	defer tx.Rollback()
 
 	dbItem := dbItem{
-		collectionId: &s.id,
+		collectionPath: (*string)(&s.path),
 		// TODO encrypt
 		secret:     sec,
 		label:      &label,
@@ -95,44 +100,35 @@ func (s *collection) CreateItem(properties map[string]dbus.Variant, secret secre
 	}
 
 	if replace {
-		for item, err := range searchItems(tx, attr) {
+		for p, err := range searchItems(tx, attr) { // TODO filter collection
 			if err != nil {
 				log.Println(err)
 				return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
 			}
 
-			if *dbItem.collectionId != *item.collectionId {
-				continue
-			}
-
-			dbItem.id = item.id
+			dbItem.path = p
 			break
 		}
 	}
 
-	var path dbus.ObjectPath
-	if dbItem.id == nil {
+	if dbItem.path == nil {
 		if err := insertItem(tx, &dbItem); err != nil {
 			log.Println(err)
 			return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
 		}
 
-		item := newItem(s.env, *dbItem.collectionId, *dbItem.id)
+		item := newItem(s.env, *dbItem.path)
 
 		if err := item.export(); err != nil {
 			log.Println(err)
 			return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
 		}
 
-		path = item.path
-
 	} else {
 		if err := updateItem(tx, &dbItem); err != nil {
 			log.Println(err)
 			return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
 		}
-
-		path = newItem(s.env, *dbItem.collectionId, *dbItem.id).path
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -140,6 +136,7 @@ func (s *collection) CreateItem(properties map[string]dbus.Variant, secret secre
 		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
 	}
 
+	path := dbus.ObjectPath(*dbItem.path)
 	noPrompt := dbus.ObjectPath("/")
 	return &path, &noPrompt, nil
 }

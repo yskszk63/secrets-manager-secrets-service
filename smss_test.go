@@ -128,7 +128,6 @@ func getSecrets(t testing.TB, conn *dbus.Conn, items []dbus.ObjectPath, session 
 	return extracted
 }
 
-
 func createItem(t testing.TB, conn *dbus.Conn, session dbus.ObjectPath, props map[string]dbus.Variant, data []byte, replace bool) dbus.ObjectPath {
 	var item dbus.ObjectPath
 	var prompt dbus.ObjectPath
@@ -194,6 +193,18 @@ func setSecret(t testing.TB, conn *dbus.Conn, item dbus.ObjectPath, session dbus
 	}
 }
 
+func getAllProperties(t testing.TB, conn *dbus.Conn, path dbus.ObjectPath, iface string) map[string]*dbus.Variant {
+	obj := conn.Object("org.freedesktop.secrets", path)
+	call := obj.Call("org.freedesktop.DBus.Properties.GetAll", 0, iface)
+
+	var result map[string]*dbus.Variant
+	if err := call.Store(&result); err != nil {
+		t.Fatal(err)
+	}
+
+	return result
+}
+
 func TestSmss(t *testing.T) {
 	conn := initDBusConnForTest(t)
 
@@ -229,8 +240,8 @@ func TestSmss(t *testing.T) {
 	item3 := createItem(t, conn, session, props3, []byte("OK3"), true)
 	_ = item3
 
-	items := getSecrets(t, conn, []dbus.ObjectPath{ item1, item2, item3 }, session)
-	expected := map[dbus.ObjectPath]string {
+	items := getSecrets(t, conn, []dbus.ObjectPath{item1, item2, item3}, session)
+	expected := map[dbus.ObjectPath]string{
 		item1: "OK!",
 		item2: "OK2",
 		item3: "OK3",
@@ -266,4 +277,7 @@ func TestSmss(t *testing.T) {
 		fmt.Printf("%#v\n", found)
 		t.Fatal()
 	}
+
+	props := getAllProperties(t, conn, "/org/freedesktop/secrets", "org.freedesktop.Secret.Service")
+	_ = props
 }

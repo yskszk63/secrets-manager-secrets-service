@@ -15,6 +15,7 @@ CREATE TABLE item (
     label TEXT,
     created TEXT DEFAULT current_timestamp NOT NULL,
     modified TEXT DEFAULT current_timestamp NOT NULL,
+    collection_path TEXT GENERATED ALWAYS AS ('/org/freedesktop/secrets/collection/' || collection_id) VIRTUAL,
     path TEXT GENERATED ALWAYS AS ('/org/freedesktop/secrets/collection/' || collection_id || '/' || id) VIRTUAL
 );
 

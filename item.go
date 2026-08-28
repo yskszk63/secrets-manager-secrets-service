@@ -3,24 +3,24 @@ package smss
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/godbus/dbus/v5"
 )
 
 type item struct {
-	env          *Env
-	collectionId int64
-	id           int64
-	path         dbus.ObjectPath
+	env  *Env
+	path dbus.ObjectPath
 }
 
-func newItem(env *Env, collectionId, id int64) *item {
-	path := dbus.ObjectPath(fmt.Sprintf("/org/freedesktop/secrets/collection/%d/%d", collectionId, id))
+func newItem(env *Env, path string) *item {
+	if !strings.HasPrefix(path, "/org/freedesktop/secrets/collection/") {
+		panic("Invalid path")
+	}
+
 	return &item{
-		env:          env,
-		collectionId: collectionId,
-		id:           id,
-		path:         path,
+		env:  env,
+		path: dbus.ObjectPath(path),
 	}
 }
 
@@ -58,7 +58,7 @@ func (i *item) Delete() (*dbus.ObjectPath, *dbus.Error) {
 	}
 	defer tx.Rollback()
 
-	if err := deleteItem(tx, i.id); err != nil {
+	if err := deleteItem(tx, string(i.path)); err != nil {
 		log.Println(err)
 		return nil, dbus.MakeFailedError(fmt.Errorf("Failure"))
 	}
@@ -85,7 +85,7 @@ func (i *item) GetSecret(session dbus.ObjectPath) (*secret, *dbus.Error) {
 	}
 	defer tx.Rollback()
 
-	dbItem, err := getItem(tx, i.id)
+	dbItem, err := findItemByPath(tx, string(i.path))
 	if err != nil {
 		log.Println(err)
 		return nil, dbus.MakeFailedError(fmt.Errorf("Failure"))
@@ -119,7 +119,7 @@ func (i *item) SetSecret(secret *secret) *dbus.Error {
 		return dbus.MakeFailedError(fmt.Errorf("Failure"))
 	}
 
-	if err := updateItemSecret(tx, i.id, data); err != nil {
+	if err := updateItemSecret(tx, string(i.path), data); err != nil {
 		log.Println(err)
 		return dbus.MakeFailedError(fmt.Errorf("Failure"))
 	}
@@ -154,7 +154,7 @@ func (i *item) GetAll(iface string) (map[string]dbus.Variant, *dbus.Error) {
 	}
 	defer tx.Rollback()
 
-	dbItem, err := getItem(tx, i.id)
+	dbItem, err := findItemByPath(tx, string(i.path))
 	if err != nil {
 		log.Println(err)
 		return nil, dbus.MakeFailedError(fmt.Errorf("Failure"))
