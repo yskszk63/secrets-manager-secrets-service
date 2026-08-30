@@ -280,4 +280,11 @@ func TestSmss(t *testing.T) {
 
 	props := getAllProperties(t, conn, "/org/freedesktop/secrets", "org.freedesktop.Secret.Service")
 	_ = props
+
+	// TODO
+	// org.freedesktop.Secret.Service.CreateCollection
+	// org.freedesktop.Secret.Service.ReadAlias
+	// org.freedesktop.Secret.Collection.Delete
+	// org.freedesktop.Secret.Collection.Delete
+	// org.freedesktop.Secret.Collection.SearchItems
 }

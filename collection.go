@@ -54,11 +54,55 @@ func (c *collection) export() error {
 // org.freedesktop.Secret.Collection
 
 func (s *collection) Delete() (*dbus.ObjectPath, *dbus.Error) {
+	if s.path == "/org/freedesktop/secrets/collection/1" {
+		return nil, dbus.MakeFailedError(fmt.Errorf("Could not delete #1"))
+	}
+
+	tx, err := s.env.db.Begin()
+	if err != nil {
+		log.Println(err)
+		return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+	defer tx.Rollback()
+
+	if err := deleteCollection(tx, string(s.path)); err != nil {
+		log.Println(err)
+		return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Println(err)
+		return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+
 	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }
 
 func (s *collection) SearchItems(attributes map[string]string) ([]dbus.ObjectPath, *dbus.Error) {
-	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	tx, err := s.env.db.Begin()
+	if err != nil {
+		log.Println(err)
+		return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+	defer tx.Rollback()
+
+	prefix := s.path + "/"
+
+	paths := []dbus.ObjectPath{}
+	for path, err := range searchItems(tx, attributes) {
+		if err != nil {
+			log.Println(err)
+			return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+		}
+
+		if !strings.HasPrefix(*path, string(prefix)) {
+			continue
+		}
+
+		paths = append(paths, dbus.ObjectPath(*path))
+	}
+
+	return paths, nil
 }
 
 func (s *collection) CreateItem(properties map[string]dbus.Variant, secret secret, replace bool) (*dbus.ObjectPath, *dbus.ObjectPath, *dbus.Error) {

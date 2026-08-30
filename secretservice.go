@@ -108,7 +108,36 @@ func (s *SecretService) OpenSession(algorithmName string, input dbus.Variant) (*
 }
 
 func (s *SecretService) CreateCollection(properties map[string]dbus.Variant, alias string) (*dbus.ObjectPath, *dbus.ObjectPath, *dbus.Error) {
-	return nil, nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	if (alias != "") {
+		return nil, nil, dbus.MakeFailedError(fmt.Errorf("Setting alias not supported."))
+	}
+
+	tx, err := s.env.db.Begin()
+	if err != nil {
+		log.Println(err)
+		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+	defer tx.Rollback()
+
+	labelv, ok := properties["org.freedesktop.Secret.Collection.Label"]
+	if !ok || labelv.Signature().String() != "s" {
+		return nil, nil, &dbus.ErrMsgInvalidArg
+	}
+
+	label := labelv.Value().(string)
+
+	col := dbCollection{ label: new(label) }
+	if err := insertCollection(tx, &col); err != nil {
+		log.Println(err)
+		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Println(err)
+		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+
+	return new(dbus.ObjectPath(*col.path)), new(dbus.ObjectPath("/")), nil
 }
 
 func (s *SecretService) SearchItems(attributes map[string]string) ([]dbus.ObjectPath, []dbus.ObjectPath, *dbus.Error) {
@@ -133,11 +162,12 @@ func (s *SecretService) SearchItems(attributes map[string]string) ([]dbus.Object
 }
 
 func (s *SecretService) Unlock(objects []dbus.ObjectPath) ([]dbus.ObjectPath, *dbus.ObjectPath, *dbus.Error) {
-	return nil, nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	return nil, nil, dbus.MakeFailedError(fmt.Errorf("Unsupported"))
 }
 
 func (s *SecretService) Lock(objects []dbus.ObjectPath) ([]dbus.ObjectPath, *dbus.ObjectPath, *dbus.Error) {
-	return nil, nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	// ALL OK
+	return objects, new(dbus.ObjectPath("/")), nil
 }
 
 func (s *SecretService) GetSecrets(items []dbus.ObjectPath, sessionPath dbus.ObjectPath) (map[dbus.ObjectPath]*secret, *dbus.Error) {
@@ -173,11 +203,15 @@ func (s *SecretService) GetSecrets(items []dbus.ObjectPath, sessionPath dbus.Obj
 }
 
 func (s *SecretService) ReadAlias(name string) (*dbus.ObjectPath, *dbus.Error) {
-	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	if name != "default" {
+		return nil, dbus.MakeFailedError(fmt.Errorf("Not supported"))
+	}
+
+	return new(dbus.ObjectPath("/org/freedesktop/secrets/collection/1")), nil
 }
 
 func (s *SecretService) SetAlias(name string, collection dbus.ObjectPath) *dbus.Error {
-	return dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	return dbus.MakeFailedError(fmt.Errorf("Not supported"))
 }
 
 // org.freedesktop.DBus.Properties

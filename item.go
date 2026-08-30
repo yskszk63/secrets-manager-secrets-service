@@ -164,8 +164,8 @@ func (i *item) GetAll(iface string) (map[string]dbus.Variant, *dbus.Error) {
 		"Locked":     dbus.MakeVariant(false),
 		"Attributes": dbus.MakeVariant(dbItem.attributes),
 		"Label":      dbus.MakeVariant(dbItem.label),
-		"Created":    dbus.MakeVariant(uint64(0)), // TODO time
-		"Modified":   dbus.MakeVariant(uint64(0)), // TODO time
+		"Created":    dbus.MakeVariant(uint64(0)), // TODO time ... unix time (s)
+		"Modified":   dbus.MakeVariant(uint64(0)), // TODO time ... unix time (s)
 	}
 
 	return result, nil
