@@ -8,18 +8,18 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
-type SecretService struct {
+type service struct {
 	env *Env
 	seq int
 }
 
-func newSecretService(env *Env) *SecretService {
-	return &SecretService{
+func newService(env *Env) *service {
+	return &service{
 		env: env,
 	}
 }
 
-func (s *SecretService) export() error {
+func (s *service) export() error {
 	mappingSecretService := map[string]string{
 		"OpenSession":      "OpenSession",
 		"CreateCollection": "CreateCollection",
@@ -51,7 +51,7 @@ func (s *SecretService) export() error {
 
 // org.freedesktop.Secret.Service
 
-func (s *SecretService) OpenSession(algorithmName string, input dbus.Variant) (*dbus.Variant, *dbus.ObjectPath, *dbus.Error) {
+func (s *service) OpenSession(algorithmName string, input dbus.Variant) (*dbus.Variant, *dbus.ObjectPath, *dbus.Error) {
 	var alg algorithm
 	var output *dbus.Variant
 
@@ -107,8 +107,8 @@ func (s *SecretService) OpenSession(algorithmName string, input dbus.Variant) (*
 	return output, &session.path, nil
 }
 
-func (s *SecretService) CreateCollection(properties map[string]dbus.Variant, alias string) (*dbus.ObjectPath, *dbus.ObjectPath, *dbus.Error) {
-	if (alias != "") {
+func (s *service) CreateCollection(properties map[string]dbus.Variant, alias string) (*dbus.ObjectPath, *dbus.ObjectPath, *dbus.Error) {
+	if alias != "" {
 		return nil, nil, dbus.MakeFailedError(fmt.Errorf("Setting alias not supported."))
 	}
 
@@ -126,7 +126,7 @@ func (s *SecretService) CreateCollection(properties map[string]dbus.Variant, ali
 
 	label := labelv.Value().(string)
 
-	col := dbCollection{ label: new(label) }
+	col := dbCollection{label: new(label)}
 	if err := insertCollection(tx, &col); err != nil {
 		log.Println(err)
 		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
@@ -137,10 +137,15 @@ func (s *SecretService) CreateCollection(properties map[string]dbus.Variant, ali
 		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
 	}
 
+	if err := newCollection(s.env, *col.path).export(); err != nil {
+		log.Println(err)
+		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+
 	return new(dbus.ObjectPath(*col.path)), new(dbus.ObjectPath("/")), nil
 }
 
-func (s *SecretService) SearchItems(attributes map[string]string) ([]dbus.ObjectPath, []dbus.ObjectPath, *dbus.Error) {
+func (s *service) SearchItems(attributes map[string]string) ([]dbus.ObjectPath, []dbus.ObjectPath, *dbus.Error) {
 	tx, err := s.env.db.Begin()
 	if err != nil {
 		log.Println(err)
@@ -161,16 +166,15 @@ func (s *SecretService) SearchItems(attributes map[string]string) ([]dbus.Object
 	return paths, []dbus.ObjectPath{}, nil
 }
 
-func (s *SecretService) Unlock(objects []dbus.ObjectPath) ([]dbus.ObjectPath, *dbus.ObjectPath, *dbus.Error) {
-	return nil, nil, dbus.MakeFailedError(fmt.Errorf("Unsupported"))
-}
-
-func (s *SecretService) Lock(objects []dbus.ObjectPath) ([]dbus.ObjectPath, *dbus.ObjectPath, *dbus.Error) {
-	// ALL OK
+func (s *service) Unlock(objects []dbus.ObjectPath) ([]dbus.ObjectPath, *dbus.ObjectPath, *dbus.Error) {
 	return objects, new(dbus.ObjectPath("/")), nil
 }
 
-func (s *SecretService) GetSecrets(items []dbus.ObjectPath, sessionPath dbus.ObjectPath) (map[dbus.ObjectPath]*secret, *dbus.Error) {
+func (s *service) Lock(objects []dbus.ObjectPath) ([]dbus.ObjectPath, *dbus.ObjectPath, *dbus.Error) {
+	return []dbus.ObjectPath{}, new(dbus.ObjectPath("/")), nil
+}
+
+func (s *service) GetSecrets(items []dbus.ObjectPath, sessionPath dbus.ObjectPath) (map[dbus.ObjectPath]*secret, *dbus.Error) {
 	tx, err := s.env.db.Begin()
 	if err != nil {
 		log.Println(err)
@@ -202,7 +206,7 @@ func (s *SecretService) GetSecrets(items []dbus.ObjectPath, sessionPath dbus.Obj
 	return results, nil
 }
 
-func (s *SecretService) ReadAlias(name string) (*dbus.ObjectPath, *dbus.Error) {
+func (s *service) ReadAlias(name string) (*dbus.ObjectPath, *dbus.Error) {
 	if name != "default" {
 		return nil, dbus.MakeFailedError(fmt.Errorf("Not supported"))
 	}
@@ -210,13 +214,21 @@ func (s *SecretService) ReadAlias(name string) (*dbus.ObjectPath, *dbus.Error) {
 	return new(dbus.ObjectPath("/org/freedesktop/secrets/collection/1")), nil
 }
 
-func (s *SecretService) SetAlias(name string, collection dbus.ObjectPath) *dbus.Error {
-	return dbus.MakeFailedError(fmt.Errorf("Not supported"))
+func (s *service) SetAlias(name string, collection dbus.ObjectPath) *dbus.Error {
+	if name == "default" {
+		return dbus.MakeFailedError(fmt.Errorf("Could not remove default alias"))
+	}
+
+	if collection != "/" {
+		return dbus.MakeFailedError(fmt.Errorf("Only remove supported"))
+	}
+
+	return nil
 }
 
 // org.freedesktop.DBus.Properties
 
-func (s *SecretService) Get(iface, name string) (*dbus.Variant, *dbus.Error) {
+func (s *service) Get(iface, name string) (*dbus.Variant, *dbus.Error) {
 	switch iface {
 	case "org.freedesktop.Secret.Service":
 		switch name {
@@ -248,11 +260,11 @@ func (s *SecretService) Get(iface, name string) (*dbus.Variant, *dbus.Error) {
 	}
 }
 
-func (s *SecretService) Set(iface, name string, value dbus.Variant) *dbus.Error {
+func (s *service) Set(iface, name string, value dbus.Variant) *dbus.Error {
 	return dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
 }
 
-func (s *SecretService) GetAll(iface string) (map[string]*dbus.Variant, *dbus.Error) {
+func (s *service) GetAll(iface string) (map[string]*dbus.Variant, *dbus.Error) {
 	switch iface {
 	case "org.freedesktop.Secret.Service":
 		collections, err := s.Get(iface, "Collections")

@@ -100,7 +100,7 @@ func (s *session) decrypt(secret *secret) ([]byte, error) {
 
 // org.freedesktop.Secret.Session
 
-func (s *session) Close() error {
+func (s *session) Close() *dbus.Error {
 	delete(s.env.sessions, s.path)
 	// TODO really??
 	if err := s.env.conn.Export(nil, s.path, "org.freedesktop.Secret.Session"); err != nil {

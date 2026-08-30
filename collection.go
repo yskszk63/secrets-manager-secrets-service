@@ -58,6 +58,16 @@ func (s *collection) Delete() (*dbus.ObjectPath, *dbus.Error) {
 		return nil, dbus.MakeFailedError(fmt.Errorf("Could not delete #1"))
 	}
 
+	if err := s.env.conn.Export(nil, s.path, "org.freedesktop.Secret.Collection"); err != nil {
+		log.Println(err)
+		return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+
+	if err := s.env.conn.Export(nil, s.path, "org.freedesktop.DBus.Properties"); err != nil {
+		log.Println(err)
+		return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+
 	tx, err := s.env.db.Begin()
 	if err != nil {
 		log.Println(err)
@@ -75,7 +85,7 @@ func (s *collection) Delete() (*dbus.ObjectPath, *dbus.Error) {
 		return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
 	}
 
-	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	return new(dbus.ObjectPath("/")), nil
 }
 
 func (s *collection) SearchItems(attributes map[string]string) ([]dbus.ObjectPath, *dbus.Error) {

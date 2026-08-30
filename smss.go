@@ -56,7 +56,7 @@ func Start(env *Env) error {
 		return err
 	}
 
-	service := newSecretService(env)
+	service := newService(env)
 
 	if err = service.export(); err != nil {
 		return err

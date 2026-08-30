@@ -3,8 +3,6 @@ package smss_test
 import (
 	"bufio"
 	"database/sql"
-	"fmt"
-	"maps"
 	"os/exec"
 	"slices"
 	"testing"
@@ -79,212 +77,580 @@ func initDBusConnForTest(t testing.TB) *dbus.Conn {
 	return client
 }
 
-func openSession(t testing.TB, conn *dbus.Conn) dbus.ObjectPath {
-	var output dbus.Variant
-	var session dbus.ObjectPath
+const IFACE_SERVICE = "org.freedesktop.Secret.Service"
+const METHOD_SERVICE_OPEN_SESSION = "org.freedesktop.Secret.Service.OpenSession"
+const METHOD_SERVICE_CREATE_COLLECTION = "org.freedesktop.Secret.Service.CreateCollection"
+const METHOD_SERVICE_SEARCH_ITEMS = "org.freedesktop.Secret.Service.SearchItems"
+const METHOD_SERVICE_UNLOCK = "org.freedesktop.Secret.Service.Unlock"
+const METHOD_SERVICE_LOCK = "org.freedesktop.Secret.Service.Lock"
+const METHOD_SERVICE_GET_SECRETS = "org.freedesktop.Secret.Service.GetSecrets"
+const METHOD_SERVICE_READ_ALIAS = "org.freedesktop.Secret.Service.ReadAlias"
+const METHOD_SERVICE_SET_ALIAS = "org.freedesktop.Secret.Service.SetAlias"
 
-	secretService := conn.Object("org.freedesktop.secrets", "/org/freedesktop/secrets")
-	call := secretService.Call("org.freedesktop.Secret.Service.OpenSession", 0, "plain", dbus.MakeVariant(""))
+const IFACE_COLLECTION = "org.freedesktop.Secret.Collection"
+const METHOD_COLLECTION_DELETE = "org.freedesktop.Secret.Collection.Delete"
+const METHOD_COLLECTION_SEARCH_ITEMS = "org.freedesktop.Secret.Collection.SearchItems"
+const METHOD_COLLECTION_CREATE_ITEM = "org.freedesktop.Secret.Collection.CreateItem"
 
-	err := call.Store(&output, &session)
-	if err != nil {
+const IFACE_ITEM = "org.freedesktop.Secret.Item"
+const METHOD_ITEM_DELETE = "org.freedesktop.Secret.Item.Delete"
+const METHOD_ITEM_GET_SECRET = "org.freedesktop.Secret.Item.GetSecret"
+const METHOD_ITEM_SET_SECRET = "org.freedesktop.Secret.Item.SetSecret"
+
+const IFACE_SESSION = "org.freedesktop.Secret.Session"
+const METHOD_SESSION_CLOSE = "org.freedesktop.Secret.Session.Close"
+
+func call(t testing.TB, call *dbus.Call, retvalues ...any) {
+	if err := call.Store(retvalues...); err != nil {
 		t.Fatal(err)
 	}
-
-	return session
-}
-
-func searchItems(t testing.TB, conn *dbus.Conn, attrs map[string]string) []dbus.ObjectPath {
-	var unlocked []dbus.ObjectPath
-	var locked []dbus.ObjectPath
-
-	secretService := conn.Object("org.freedesktop.secrets", "/org/freedesktop/secrets")
-	call := secretService.Call("org.freedesktop.Secret.Service.SearchItems", 0, attrs)
-
-	err := call.Store(&unlocked, &locked)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return unlocked
-}
-
-func getSecrets(t testing.TB, conn *dbus.Conn, items []dbus.ObjectPath, session dbus.ObjectPath) map[dbus.ObjectPath]string {
-	var results map[dbus.ObjectPath]secret
-
-	secretService := conn.Object("org.freedesktop.secrets", "/org/freedesktop/secrets")
-	call := secretService.Call("org.freedesktop.Secret.Service.GetSecrets", 0, items, session)
-
-	err := call.Store(&results)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	extracted := make(map[dbus.ObjectPath]string, len(results))
-	for key, val := range results {
-		extracted[key] = string(val.Value)
-	}
-
-	return extracted
-}
-
-func createItem(t testing.TB, conn *dbus.Conn, session dbus.ObjectPath, props map[string]dbus.Variant, data []byte, replace bool) dbus.ObjectPath {
-	var item dbus.ObjectPath
-	var prompt dbus.ObjectPath
-
-	s := secret{
-		Session:     session,
-		Parameters:  []byte(""),
-		Value:       data,
-		ContentType: "",
-	}
-
-	secretService := conn.Object("org.freedesktop.secrets", "/org/freedesktop/secrets/aliases/default")
-	call := secretService.Call("org.freedesktop.Secret.Collection.CreateItem", 0, props, s, replace)
-
-	err := call.Store(&item, &prompt)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return item
-}
-
-func deleteItem(t testing.TB, conn *dbus.Conn, item dbus.ObjectPath) {
-	var prompt dbus.ObjectPath
-
-	secretService := conn.Object("org.freedesktop.secrets", item)
-	call := secretService.Call("org.freedesktop.Secret.Item.Delete", 0)
-
-	err := call.Store(&prompt)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func getSecret(t testing.TB, conn *dbus.Conn, item dbus.ObjectPath, session dbus.ObjectPath) []byte {
-	var secret *secret
-
-	secretService := conn.Object("org.freedesktop.secrets", item)
-	call := secretService.Call("org.freedesktop.Secret.Item.GetSecret", 0, session)
-
-	err := call.Store(&secret)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return secret.Value
-}
-
-func setSecret(t testing.TB, conn *dbus.Conn, item dbus.ObjectPath, session dbus.ObjectPath, data []byte) {
-	secret := secret{
-		Session:     session,
-		Parameters:  []byte(""),
-		Value:       data,
-		ContentType: "",
-	}
-
-	secretService := conn.Object("org.freedesktop.secrets", item)
-	call := secretService.Call("org.freedesktop.Secret.Item.SetSecret", 0, secret)
-
-	err := call.Store()
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func getAllProperties(t testing.TB, conn *dbus.Conn, path dbus.ObjectPath, iface string) map[string]*dbus.Variant {
-	obj := conn.Object("org.freedesktop.secrets", path)
-	call := obj.Call("org.freedesktop.DBus.Properties.GetAll", 0, iface)
-
-	var result map[string]*dbus.Variant
-	if err := call.Store(&result); err != nil {
-		t.Fatal(err)
-	}
-
-	return result
 }
 
 func TestSmss(t *testing.T) {
 	conn := initDBusConnForTest(t)
 
-	session := openSession(t, conn)
+	dest := "org.freedesktop.secrets"
+	t.Run(IFACE_SERVICE, func(t *testing.T) {
+		service := conn.Object(dest, "/org/freedesktop/secrets")
 
-	props1 := map[string]dbus.Variant{
-		"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
-			"a": "1",
-			"b": "2",
-			"c": "3",
-		}),
-		"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("test"),
-	}
-	createItem(t, conn, session, props1, []byte("OK"), true)
-	item1 := createItem(t, conn, session, props1, []byte("OK!"), true)
+		t.Run(METHOD_SERVICE_OPEN_SESSION, func(t *testing.T) {
+			var sessionPath dbus.ObjectPath
+			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
+				new(dbus.Variant), &sessionPath)
 
-	props2 := map[string]dbus.Variant{
-		"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
-			"a": "1",
-			"b": "2",
-		}),
-		"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("test2"),
-	}
-	item2 := createItem(t, conn, session, props2, []byte("OK2"), false)
+			t.Cleanup(func() {
+				session := conn.Object(dest, sessionPath)
+				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
+			})
+		})
 
-	props3 := map[string]dbus.Variant{
-		"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
-			"a": "4",
-			"b": "2",
-		}),
-		"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("test3"),
-	}
-	item3 := createItem(t, conn, session, props3, []byte("OK3"), true)
-	_ = item3
+		t.Run(METHOD_SERVICE_CREATE_COLLECTION, func(t *testing.T) {
+			var collection dbus.ObjectPath
+			props := map[string]dbus.Variant{
+				"org.freedesktop.Secret.Collection.Label": dbus.MakeVariant("collection"),
+			}
+			call(t, service.Call(METHOD_SERVICE_CREATE_COLLECTION, 0, props, ""),
+				&collection, new(dbus.ObjectPath))
+			if collection == "/" {
+				t.Fatal()
+			}
+		})
 
-	items := getSecrets(t, conn, []dbus.ObjectPath{item1, item2, item3}, session)
-	expected := map[dbus.ObjectPath]string{
-		item1: "OK!",
-		item2: "OK2",
-		item3: "OK3",
-	}
-	if !maps.Equal(items, expected) {
-		t.Fatal()
-	}
+		t.Run(METHOD_COLLECTION_SEARCH_ITEMS, func(t *testing.T) {
+			var sessionPath dbus.ObjectPath
+			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
+				new(dbus.Variant), &sessionPath)
 
-	attrs := map[string]string{
-		"a": "1",
-		"b": "2",
-	}
-	found := searchItems(t, conn, attrs)
+			t.Cleanup(func() {
+				session := conn.Object(dest, sessionPath)
+				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
+			})
 
-	if !slices.Equal(found, []dbus.ObjectPath{item1, item2}) {
-		t.Fatal()
-	}
+			var collectionPath dbus.ObjectPath
+			props := map[string]dbus.Variant{
+				"org.freedesktop.Secret.Collection.Label": dbus.MakeVariant("collection"),
+			}
+			call(t, service.Call(METHOD_SERVICE_CREATE_COLLECTION, 0, props, ""),
+				&collectionPath, new(dbus.ObjectPath))
 
-	if !slices.Equal(getSecret(t, conn, item1, session), []byte("OK!")) {
-		t.Fatal()
-	}
+			collection := conn.Object(dest, collectionPath)
 
-	setSecret(t, conn, item1, session, []byte("OK"))
+			var item1Path dbus.ObjectPath
+			var item2Path dbus.ObjectPath
+			var item3Path dbus.ObjectPath
 
-	if !slices.Equal(getSecret(t, conn, item1, session), []byte("OK")) {
-		t.Fatal()
-	}
+			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
+				map[string]dbus.Variant{
+					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item1"),
+					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
+						"a": t.Name() + "1",
+						"b": "2",
+						"c": "3",
+					}),
+				},
+				secret{
+					Session:     sessionPath,
+					Parameters:  []byte{},
+					Value:       []byte("ITEM1"),
+					ContentType: "text/plain",
+				}, false),
+				&item1Path, new(dbus.ObjectPath),
+			)
 
-	deleteItem(t, conn, item1)
+			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
+				map[string]dbus.Variant{
+					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item2"),
+					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
+						"a": t.Name() + "1",
+						"b": "2",
+					}),
+				},
+				secret{
+					Session:     sessionPath,
+					Parameters:  []byte{},
+					Value:       []byte("ITEM2"),
+					ContentType: "text/plain",
+				}, false),
+				&item2Path, new(dbus.ObjectPath),
+			)
 
-	found2 := searchItems(t, conn, attrs)
-	if !slices.Equal(found2, []dbus.ObjectPath{item2}) {
-		fmt.Printf("%#v\n", found)
-		t.Fatal()
-	}
+			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
+				map[string]dbus.Variant{
+					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item3"),
+					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
+						"a": t.Name() + "2",
+						"b": "2",
+						"c": "3",
+					}),
+				},
+				secret{
+					Session:     sessionPath,
+					Parameters:  []byte{},
+					Value:       []byte("ITEM3"),
+					ContentType: "text/plain",
+				}, false),
+				&item3Path, new(dbus.ObjectPath),
+			)
 
-	props := getAllProperties(t, conn, "/org/freedesktop/secrets", "org.freedesktop.Secret.Service")
-	_ = props
+			var results []dbus.ObjectPath
+			attrs := map[string]string{
+				"a": t.Name() + "1",
+				"b": "2",
+			}
+			call(t, service.Call(METHOD_SERVICE_SEARCH_ITEMS, 0, attrs),
+				&results, new([]dbus.ObjectPath))
 
-	// TODO
-	// org.freedesktop.Secret.Service.CreateCollection
-	// org.freedesktop.Secret.Service.ReadAlias
-	// org.freedesktop.Secret.Collection.Delete
-	// org.freedesktop.Secret.Collection.Delete
-	// org.freedesktop.Secret.Collection.SearchItems
+			expected := []dbus.ObjectPath{
+				item1Path,
+				item2Path,
+			}
+			if !slices.Equal(results, expected) {
+				t.Fatal()
+			}
+		})
+
+		t.Run(METHOD_SERVICE_UNLOCK, func(t *testing.T) {
+			targets := []dbus.ObjectPath{
+				"/org/freedesktop/secrets/collection/1",
+				"/org/freedesktop/secrets/collection/1/1",
+				"/",
+			}
+			var unlocked []dbus.ObjectPath
+			call(t, service.Call(METHOD_SERVICE_UNLOCK, 0, targets), &unlocked, new(dbus.ObjectPath))
+			if !slices.Equal(unlocked, targets) {
+				t.Fatal()
+			}
+		})
+
+		t.Run(METHOD_SERVICE_LOCK, func(t *testing.T) {
+			targets := []dbus.ObjectPath{
+				"/org/freedesktop/secrets/collection/1",
+				"/org/freedesktop/secrets/collection/1/1",
+				"/",
+			}
+			var unlocked []dbus.ObjectPath
+			call(t, service.Call(METHOD_SERVICE_LOCK, 0, targets), &unlocked, new(dbus.ObjectPath))
+			if !slices.Equal(unlocked, []dbus.ObjectPath{}) {
+				t.Fatal()
+			}
+		})
+
+		t.Run(METHOD_SERVICE_GET_SECRETS, func(t *testing.T) {
+			var sessionPath dbus.ObjectPath
+			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
+				new(dbus.Variant), &sessionPath)
+
+			t.Cleanup(func() {
+				session := conn.Object(dest, sessionPath)
+				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
+			})
+
+			var collectionPath dbus.ObjectPath
+			props := map[string]dbus.Variant{
+				"org.freedesktop.Secret.Collection.Label": dbus.MakeVariant("collection"),
+			}
+			call(t, service.Call(METHOD_SERVICE_CREATE_COLLECTION, 0, props, ""),
+				&collectionPath, new(dbus.ObjectPath))
+
+			collection := conn.Object(dest, collectionPath)
+
+			var item1Path dbus.ObjectPath
+			var item2Path dbus.ObjectPath
+			var item3Path dbus.ObjectPath
+
+			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
+				map[string]dbus.Variant{
+					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item1"),
+					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
+						"a": t.Name() + "1",
+						"b": "2",
+						"c": "3",
+					}),
+				},
+				secret{
+					Session:     sessionPath,
+					Parameters:  []byte{},
+					Value:       []byte("ITEM1"),
+					ContentType: "text/plain",
+				}, false),
+				&item1Path, new(dbus.ObjectPath),
+			)
+
+			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
+				map[string]dbus.Variant{
+					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item2"),
+					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
+						"a": t.Name() + "1",
+						"b": "2",
+					}),
+				},
+				secret{
+					Session:     sessionPath,
+					Parameters:  []byte{},
+					Value:       []byte("ITEM2"),
+					ContentType: "text/plain",
+				}, false),
+				&item2Path, new(dbus.ObjectPath),
+			)
+
+			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
+				map[string]dbus.Variant{
+					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item3"),
+					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
+						"a": t.Name() + "2",
+						"b": "2",
+						"c": "3",
+					}),
+				},
+				secret{
+					Session:     sessionPath,
+					Parameters:  []byte{},
+					Value:       []byte("ITEM3"),
+					ContentType: "text/plain",
+				}, false),
+				&item3Path, new(dbus.ObjectPath),
+			)
+
+			var secrets map[dbus.ObjectPath]secret
+			call(t, service.Call(METHOD_SERVICE_GET_SECRETS, 0, []dbus.ObjectPath{item1Path, item2Path, item3Path}, sessionPath),
+				&secrets)
+
+			if string(secrets[item1Path].Value) != "ITEM1" {
+				t.Fatal()
+			}
+
+			if string(secrets[item2Path].Value) != "ITEM2" {
+				t.Fatal()
+			}
+
+			if string(secrets[item3Path].Value) != "ITEM3" {
+				t.Fatal()
+			}
+		})
+
+		t.Run(METHOD_SERVICE_READ_ALIAS, func(t *testing.T) {
+			var collection dbus.ObjectPath
+			call(t, service.Call(METHOD_SERVICE_READ_ALIAS, 0, "default"), &collection)
+			if collection != "/org/freedesktop/secrets/collection/1" {
+				t.Fatal()
+			}
+		})
+
+		t.Run(METHOD_SERVICE_SET_ALIAS, func(t *testing.T) {
+			call(t, service.Call(METHOD_SERVICE_SET_ALIAS, 0, "foo", "/"))
+		})
+	})
+
+	t.Run(IFACE_COLLECTION, func(t *testing.T) {
+		service := conn.Object(dest, "/org/freedesktop/secrets")
+
+		t.Run(METHOD_COLLECTION_DELETE, func(t *testing.T) {
+			var collectionPath dbus.ObjectPath
+			props := map[string]dbus.Variant{
+				"org.freedesktop.Secret.Collection.Label": dbus.MakeVariant("collection"),
+			}
+			call(t, service.Call(METHOD_SERVICE_CREATE_COLLECTION, 0, props, ""),
+				&collectionPath, new(dbus.ObjectPath))
+
+			collection := conn.Object(dest, collectionPath)
+
+			var prompt dbus.ObjectPath
+			call(t, collection.Call(METHOD_COLLECTION_DELETE, 0), &prompt)
+			if prompt != "/" {
+				t.Fatal()
+			}
+		})
+
+		t.Run(METHOD_COLLECTION_SEARCH_ITEMS, func(t *testing.T) {
+			var sessionPath dbus.ObjectPath
+			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
+				new(dbus.Variant), &sessionPath)
+
+			t.Cleanup(func() {
+				session := conn.Object(dest, sessionPath)
+				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
+			})
+
+			var collectionPath dbus.ObjectPath
+			props := map[string]dbus.Variant{
+				"org.freedesktop.Secret.Collection.Label": dbus.MakeVariant("collection"),
+			}
+			call(t, service.Call(METHOD_SERVICE_CREATE_COLLECTION, 0, props, ""),
+				&collectionPath, new(dbus.ObjectPath))
+
+			collection := conn.Object(dest, collectionPath)
+
+			var item1Path dbus.ObjectPath
+			var item2Path dbus.ObjectPath
+			var item3Path dbus.ObjectPath
+
+			call(t, conn.Object(dest, "/org/freedesktop/secrets/aliases/default").Call(METHOD_COLLECTION_CREATE_ITEM, 0,
+				map[string]dbus.Variant{
+					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item1"),
+					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
+						"a": t.Name() + "1",
+						"b": "2",
+						"c": "3",
+					}),
+				},
+				secret{
+					Session:     sessionPath,
+					Parameters:  []byte{},
+					Value:       []byte("ITEM1"),
+					ContentType: "text/plain",
+				}, false),
+				&item1Path, new(dbus.ObjectPath),
+			)
+
+			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
+				map[string]dbus.Variant{
+					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item2"),
+					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
+						"a": t.Name() + "1",
+						"b": "2",
+					}),
+				},
+				secret{
+					Session:     sessionPath,
+					Parameters:  []byte{},
+					Value:       []byte("ITEM2"),
+					ContentType: "text/plain",
+				}, false),
+				&item2Path, new(dbus.ObjectPath),
+			)
+
+			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
+				map[string]dbus.Variant{
+					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item3"),
+					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
+						"a": t.Name() + "2",
+						"b": "2",
+						"c": "3",
+					}),
+				},
+				secret{
+					Session:     sessionPath,
+					Parameters:  []byte{},
+					Value:       []byte("ITEM3"),
+					ContentType: "text/plain",
+				}, false),
+				&item3Path, new(dbus.ObjectPath),
+			)
+
+			var results []dbus.ObjectPath
+			attrs := map[string]string{
+				"a": t.Name() + "1",
+				"b": "2",
+			}
+			call(t, collection.Call(METHOD_COLLECTION_SEARCH_ITEMS, 0, attrs), &results)
+
+			if !slices.Equal(results, []dbus.ObjectPath{item2Path}) {
+				t.Fatal()
+			}
+		})
+
+		t.Run(METHOD_COLLECTION_CREATE_ITEM, func(t *testing.T) {
+			var sessionPath dbus.ObjectPath
+			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
+				new(dbus.Variant), &sessionPath)
+
+			t.Cleanup(func() {
+				session := conn.Object(dest, sessionPath)
+				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
+			})
+
+			var collectionPath dbus.ObjectPath
+			props := map[string]dbus.Variant{
+				"org.freedesktop.Secret.Collection.Label": dbus.MakeVariant("collection"),
+			}
+			call(t, service.Call(METHOD_SERVICE_CREATE_COLLECTION, 0, props, ""),
+				&collectionPath, new(dbus.ObjectPath))
+			collection := conn.Object(dest, collectionPath)
+
+			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
+				map[string]dbus.Variant{
+					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item1"),
+					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
+						"a": t.Name() + "1",
+						"b": "2",
+						"c": "3",
+					}),
+				},
+				secret{
+					Session:     sessionPath,
+					Parameters:  []byte{},
+					Value:       []byte("ITEM1"),
+					ContentType: "text/plain",
+				}, false),
+				new(dbus.ObjectPath), new(dbus.ObjectPath),
+			)
+		})
+	})
+
+	t.Run(IFACE_ITEM, func(t *testing.T) {
+		service := conn.Object(dest, "/org/freedesktop/secrets")
+
+		var collectionPath dbus.ObjectPath
+		props := map[string]dbus.Variant{
+			"org.freedesktop.Secret.Collection.Label": dbus.MakeVariant("collection"),
+		}
+		call(t, service.Call(METHOD_SERVICE_CREATE_COLLECTION, 0, props, ""),
+			&collectionPath, new(dbus.ObjectPath))
+		collection := conn.Object(dest, collectionPath)
+
+		t.Run(METHOD_ITEM_DELETE, func(t *testing.T) {
+			var sessionPath dbus.ObjectPath
+			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
+				new(dbus.Variant), &sessionPath)
+
+			t.Cleanup(func() {
+				session := conn.Object(dest, sessionPath)
+				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
+			})
+
+			var itemPath dbus.ObjectPath
+			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
+				map[string]dbus.Variant{
+					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item1"),
+					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
+						"a": t.Name() + "1",
+						"b": "2",
+						"c": "3",
+					}),
+				},
+				secret{
+					Session:     sessionPath,
+					Parameters:  []byte{},
+					Value:       []byte("ITEM1"),
+					ContentType: "text/plain",
+				}, false),
+				&itemPath, new(dbus.ObjectPath),
+			)
+
+			item := conn.Object(dest, itemPath)
+
+			call(t, item.Call(METHOD_ITEM_DELETE, 0), new(dbus.ObjectPath))
+		})
+
+		t.Run(METHOD_ITEM_GET_SECRET, func(t *testing.T) {
+			var sessionPath dbus.ObjectPath
+			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
+				new(dbus.Variant), &sessionPath)
+
+			t.Cleanup(func() {
+				session := conn.Object(dest, sessionPath)
+				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
+			})
+
+			var itemPath dbus.ObjectPath
+			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
+				map[string]dbus.Variant{
+					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item1"),
+					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
+						"a": t.Name() + "1",
+						"b": "2",
+						"c": "3",
+					}),
+				},
+				secret{
+					Session:     sessionPath,
+					Parameters:  []byte{},
+					Value:       []byte("ITEM1"),
+					ContentType: "text/plain",
+				}, false),
+				&itemPath, new(dbus.ObjectPath),
+			)
+
+			item := conn.Object(dest, itemPath)
+
+			var s secret
+			call(t, item.Call(METHOD_ITEM_GET_SECRET, 0, sessionPath), &s)
+
+			if string(s.Value) != "ITEM1" {
+				t.Fatal()
+			}
+		})
+
+		t.Run(METHOD_ITEM_SET_SECRET, func(t *testing.T) {
+			var sessionPath dbus.ObjectPath
+			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
+				new(dbus.Variant), &sessionPath)
+
+			t.Cleanup(func() {
+				session := conn.Object(dest, sessionPath)
+				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
+			})
+
+			var itemPath dbus.ObjectPath
+			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
+				map[string]dbus.Variant{
+					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item1"),
+					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
+						"a": t.Name() + "1",
+						"b": "2",
+						"c": "3",
+					}),
+				},
+				secret{
+					Session:     sessionPath,
+					Parameters:  []byte{},
+					Value:       []byte("ITEM1"),
+					ContentType: "text/plain",
+				}, false),
+				&itemPath, new(dbus.ObjectPath),
+			)
+
+			item := conn.Object(dest, itemPath)
+
+			call(t, item.Call(METHOD_ITEM_SET_SECRET, 0, secret{
+				Session:     sessionPath,
+				Value:       []byte("CHANGED"),
+				Parameters:  []byte{},
+				ContentType: "text/plain",
+			}))
+
+			var s secret
+			call(t, item.Call(METHOD_ITEM_GET_SECRET, 0, sessionPath), &s)
+
+			if string(s.Value) != "CHANGED" {
+				t.Fatal()
+			}
+		})
+	})
+
+	t.Run(IFACE_SESSION, func(t *testing.T) {
+		service := conn.Object(dest, "/org/freedesktop/secrets")
+
+		t.Run(METHOD_SESSION_CLOSE, func(t *testing.T) {
+			var sessionPath dbus.ObjectPath
+			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
+				new(dbus.Variant), &sessionPath)
+
+			t.Cleanup(func() {
+				session := conn.Object(dest, sessionPath)
+				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
+			})
+
+		})
+	})
 }
