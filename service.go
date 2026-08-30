@@ -10,7 +10,6 @@ import (
 
 type service struct {
 	env *Env
-	seq int
 }
 
 func newService(env *Env) *service {
@@ -94,8 +93,6 @@ func (s *service) OpenSession(algorithmName string, input dbus.Variant) (*dbus.V
 	default:
 		return nil, nil, dbus.MakeFailedError(fmt.Errorf("Not implemented"))
 	}
-
-	s.seq += 1
 
 	session := s.env.putSession(func(e *Env, u uint32) *session { return newSession(e, u, alg) })
 	if err := session.export(); err != nil {
