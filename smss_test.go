@@ -3,6 +3,7 @@ package smss_test
 import (
 	"bufio"
 	"database/sql"
+	"os"
 	"os/exec"
 	"slices"
 	"testing"
@@ -22,13 +23,15 @@ type secret struct {
 func runBroker(t testing.TB) string {
 	cx := t.Context()
 
-	// TODO print-address=<extra>
-	cmd := exec.CommandContext(cx, "dbus-daemon", "--session", "--nofork", "--print-address=1")
-	stdout, err := cmd.StdoutPipe()
+	r, w, err := os.Pipe()
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
-	defer stdout.Close()
+	defer r.Close()
+	defer w.Close()
+
+	cmd := exec.CommandContext(cx, "dbus-daemon", "--session", "--nofork", "--print-address=3")
+	cmd.ExtraFiles = []*os.File{w}
 
 	if err := cmd.Start(); err != nil {
 		panic(err)
@@ -38,7 +41,7 @@ func runBroker(t testing.TB) string {
 		cmd.Process.Wait()
 	})
 
-	sc := bufio.NewScanner(stdout)
+	sc := bufio.NewScanner(r)
 	if !sc.Scan() {
 		panic("empty")
 	}
