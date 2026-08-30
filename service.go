@@ -186,13 +186,13 @@ func (s *service) GetSecrets(items []dbus.ObjectPath, sessionPath dbus.ObjectPat
 
 	results := make(map[dbus.ObjectPath]*secret, len(items))
 	for _, item := range items {
-		dbItem, err := findItemByPath(tx, string(item))
+		dbItem, err := findItem(tx, string(item))
 		if err != nil {
 			log.Println(err)
 			return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
 		}
 
-		s, err := sessionobj.encrypt(dbItem.secret)
+		s, err := sessionobj.encrypt(dbItem.secret, *dbItem.contentType)
 		if err != nil {
 			log.Println(err)
 			return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
@@ -238,7 +238,7 @@ func (s *service) Get(iface, name string) (*dbus.Variant, *dbus.Error) {
 			defer tx.Rollback()
 
 			paths := make([]*dbus.ObjectPath, 0)
-			for path, err := range listCollectionPaths(tx) {
+			for path, err := range listCollections(tx) {
 				if err != nil {
 					log.Println(err)
 					return nil, dbus.MakeFailedError(fmt.Errorf("failure"))

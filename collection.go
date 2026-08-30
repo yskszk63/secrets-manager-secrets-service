@@ -149,9 +149,10 @@ func (s *collection) CreateItem(properties map[string]dbus.Variant, secret secre
 	dbItem := dbItem{
 		collectionPath: (*string)(&s.path),
 		// TODO encrypt
-		secret:     sec,
-		label:      &label,
-		attributes: attr,
+		secret:      sec,
+		contentType: &secret.ContentType,
+		label:       &label,
+		attributes:  attr,
 	}
 
 	if replace {

@@ -8,46 +8,47 @@ import (
 	"github.com/godbus/dbus/v5/prop"
 )
 
+type paramValue struct {
+	parameters []byte
+	value      []byte
+}
+
 type algorithm interface {
-	encrypt(dbus.ObjectPath, []byte) (*secret, error)
-	decrypt(*secret) ([]byte, error)
+	encrypt([]byte) (*paramValue, error)
+	decrypt(*paramValue) ([]byte, error)
 }
 
 type algPlain struct {
 }
 
-func (a *algPlain) encrypt(session dbus.ObjectPath, data []byte) (*secret, error) {
-	return &secret{
-		Session:     session,
-		Parameters:  []byte{},
-		Value:       data,
-		ContentType: "text/plain",
+func (a *algPlain) encrypt(data []byte) (*paramValue, error) {
+	return &paramValue{
+		parameters: []byte{},
+		value:      data,
 	}, nil
 }
 
-func (a *algPlain) decrypt(secret *secret) ([]byte, error) {
-	return secret.Value, nil
+func (a *algPlain) decrypt(secret *paramValue) ([]byte, error) {
+	return secret.value, nil
 }
 
 type algDhIetf1024Sha256Aes128CbcPkcs7 struct {
 	key []byte
 }
 
-func (a *algDhIetf1024Sha256Aes128CbcPkcs7) encrypt(session dbus.ObjectPath, data []byte) (*secret, error) {
+func (a *algDhIetf1024Sha256Aes128CbcPkcs7) encrypt(data []byte) (*paramValue, error) {
 	iv, value, err := unauthenticatedAESCBCEncrypt(data, a.key)
 	if err != nil {
 		return nil, err
 	}
-	return &secret{
-		Session:     session,
-		Parameters:  iv,
-		Value:       value,
-		ContentType: "text/plain",
+	return &paramValue{
+		parameters: iv,
+		value:      value,
 	}, nil
 }
 
-func (a *algDhIetf1024Sha256Aes128CbcPkcs7) decrypt(secret *secret) ([]byte, error) {
-	return unauthenticatedAESCBCDecrypt(secret.Parameters, secret.Value, a.key)
+func (a *algDhIetf1024Sha256Aes128CbcPkcs7) decrypt(secret *paramValue) ([]byte, error) {
+	return unauthenticatedAESCBCDecrypt(secret.parameters, secret.value, a.key)
 }
 
 type session struct {
@@ -90,12 +91,22 @@ func (s *session) export() error {
 	return nil
 }
 
-func (s *session) encrypt(data []byte) (*secret, error) {
-	return s.algorithm.encrypt(s.path, data)
+func (s *session) encrypt(data []byte, contentType string) (*secret, error) {
+	pv, err := s.algorithm.encrypt(data)
+	if err != nil {
+		return nil, err
+	}
+
+	return &secret{
+		Session:     s.path,
+		Parameters:  pv.parameters,
+		Value:       pv.value,
+		ContentType: contentType,
+	}, nil
 }
 
 func (s *session) decrypt(secret *secret) ([]byte, error) {
-	return s.algorithm.decrypt(secret)
+	return s.algorithm.decrypt(&paramValue{parameters: secret.Parameters, value: secret.Value})
 }
 
 // org.freedesktop.Secret.Session

@@ -125,6 +125,7 @@ func TestItemInsertUpdate(t *testing.T) {
 	item := dbItem{
 		collectionPath: new("/org/freedesktop/secrets/collection/1"),
 		secret:         []byte("secret"),
+		contentType:    new("text/plain"),
 		label:          new("ok"),
 		attributes: map[string]string{
 			"a": "1",
@@ -166,6 +167,7 @@ func TestSearchItems(t *testing.T) {
 	item1 := dbItem{
 		collectionPath: new("/org/freedesktop/secrets/collection/1"),
 		secret:         []byte("secret1"),
+		contentType:    new("text/plain"),
 		label:          new("item1"),
 		attributes: map[string]string{
 			"a": "1",
@@ -180,6 +182,7 @@ func TestSearchItems(t *testing.T) {
 	item2 := dbItem{
 		collectionPath: new("/org/freedesktop/secrets/collection/1"),
 		secret:         []byte("secret2"),
+		contentType:    new("text/plain"),
 		label:          new("item2"),
 		attributes: map[string]string{
 			"a": "1",
@@ -193,6 +196,7 @@ func TestSearchItems(t *testing.T) {
 	item3 := dbItem{
 		collectionPath: new("/org/freedesktop/secrets/collection/1"),
 		secret:         []byte("secret3"),
+		contentType:    new("text/plain"),
 		label:          new("item3"),
 		attributes: map[string]string{
 			"a": "2",

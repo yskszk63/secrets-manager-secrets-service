@@ -12,6 +12,7 @@ CREATE TABLE item (
     id INTEGER PRIMARY KEY,
     collection_id INTEGER NOT NULL,
     secret BLOB NOT NULL,
+    content_type TEXT NOT NULL,
     label TEXT,
     created TEXT DEFAULT current_timestamp NOT NULL,
     modified TEXT DEFAULT current_timestamp NOT NULL,
