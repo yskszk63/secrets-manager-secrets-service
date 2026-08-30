@@ -73,10 +73,11 @@ func (i *item) Delete() (*dbus.ObjectPath, *dbus.Error) {
 }
 
 func (i *item) GetSecret(session dbus.ObjectPath) (*secret, *dbus.Error) {
-	s, ok := i.env.sessions[session]
+	s, unlock, ok := i.env.lookupSession(session)
 	if !ok {
 		return nil, errNoSession
 	}
+	defer unlock()
 
 	tx, err := i.env.db.Begin()
 	if err != nil {
@@ -101,10 +102,11 @@ func (i *item) GetSecret(session dbus.ObjectPath) (*secret, *dbus.Error) {
 }
 
 func (i *item) SetSecret(secret *secret) *dbus.Error {
-	s, ok := i.env.sessions[secret.Session]
+	s, unlock, ok := i.env.lookupSession(secret.Session)
 	if !ok {
 		return errNoSession
 	}
+	defer unlock()
 
 	tx, err := i.env.db.Begin()
 	if err != nil {

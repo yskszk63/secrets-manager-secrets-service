@@ -52,12 +52,12 @@ func (a *algDhIetf1024Sha256Aes128CbcPkcs7) decrypt(secret *secret) ([]byte, err
 
 type session struct {
 	env       *Env
-	id        int
+	id        uint32
 	path      dbus.ObjectPath
 	algorithm algorithm
 }
 
-func newSession(env *Env, id int, algorithm algorithm) *session {
+func newSession(env *Env, id uint32, algorithm algorithm) *session {
 	path := dbus.ObjectPath(fmt.Sprintf(
 		"/org/freedesktop/secrets/session/%d", id))
 	return &session{
@@ -101,8 +101,7 @@ func (s *session) decrypt(secret *secret) ([]byte, error) {
 // org.freedesktop.Secret.Session
 
 func (s *session) Close() *dbus.Error {
-	delete(s.env.sessions, s.path)
-	// TODO really??
+	s.env.removeSession(s.path)
 	if err := s.env.conn.Export(nil, s.path, "org.freedesktop.Secret.Session"); err != nil {
 		log.Println(err)
 		return dbus.MakeFailedError(fmt.Errorf("failure"))

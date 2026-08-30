@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -57,11 +58,14 @@ func initDBusConnForTest(t testing.TB) *dbus.Conn {
 	}
 	t.Cleanup(func() { conn.Close() })
 
-	db, err := sql.Open("sqlite", ":memory:")
+	path := filepath.Join(t.TempDir(), "db.db")
+	db, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal()
 	}
 	t.Cleanup(func() { db.Close() })
+
+	db.SetMaxOpenConns(1)
 
 	if err := smss.Migrate(db); err != nil {
 		t.Fatal(err)
@@ -117,6 +121,8 @@ func TestSmss(t *testing.T) {
 		service := conn.Object(dest, "/org/freedesktop/secrets")
 
 		t.Run(METHOD_SERVICE_OPEN_SESSION, func(t *testing.T) {
+			t.Parallel()
+
 			var sessionPath dbus.ObjectPath
 			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
 				new(dbus.Variant), &sessionPath)
@@ -128,6 +134,8 @@ func TestSmss(t *testing.T) {
 		})
 
 		t.Run(METHOD_SERVICE_CREATE_COLLECTION, func(t *testing.T) {
+			t.Parallel()
+
 			var collection dbus.ObjectPath
 			props := map[string]dbus.Variant{
 				"org.freedesktop.Secret.Collection.Label": dbus.MakeVariant("collection"),
@@ -140,6 +148,8 @@ func TestSmss(t *testing.T) {
 		})
 
 		t.Run(METHOD_COLLECTION_SEARCH_ITEMS, func(t *testing.T) {
+			t.Parallel()
+
 			var sessionPath dbus.ObjectPath
 			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
 				new(dbus.Variant), &sessionPath)
@@ -233,6 +243,8 @@ func TestSmss(t *testing.T) {
 		})
 
 		t.Run(METHOD_SERVICE_UNLOCK, func(t *testing.T) {
+			t.Parallel()
+
 			targets := []dbus.ObjectPath{
 				"/org/freedesktop/secrets/collection/1",
 				"/org/freedesktop/secrets/collection/1/1",
@@ -246,6 +258,8 @@ func TestSmss(t *testing.T) {
 		})
 
 		t.Run(METHOD_SERVICE_LOCK, func(t *testing.T) {
+			t.Parallel()
+
 			targets := []dbus.ObjectPath{
 				"/org/freedesktop/secrets/collection/1",
 				"/org/freedesktop/secrets/collection/1/1",
@@ -259,6 +273,8 @@ func TestSmss(t *testing.T) {
 		})
 
 		t.Run(METHOD_SERVICE_GET_SECRETS, func(t *testing.T) {
+			t.Parallel()
+
 			var sessionPath dbus.ObjectPath
 			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
 				new(dbus.Variant), &sessionPath)
@@ -352,6 +368,8 @@ func TestSmss(t *testing.T) {
 		})
 
 		t.Run(METHOD_SERVICE_READ_ALIAS, func(t *testing.T) {
+			t.Parallel()
+
 			var collection dbus.ObjectPath
 			call(t, service.Call(METHOD_SERVICE_READ_ALIAS, 0, "default"), &collection)
 			if collection != "/org/freedesktop/secrets/collection/1" {
@@ -360,6 +378,8 @@ func TestSmss(t *testing.T) {
 		})
 
 		t.Run(METHOD_SERVICE_SET_ALIAS, func(t *testing.T) {
+			t.Parallel()
+
 			call(t, service.Call(METHOD_SERVICE_SET_ALIAS, 0, "foo", "/"))
 		})
 	})
@@ -368,6 +388,8 @@ func TestSmss(t *testing.T) {
 		service := conn.Object(dest, "/org/freedesktop/secrets")
 
 		t.Run(METHOD_COLLECTION_DELETE, func(t *testing.T) {
+			t.Parallel()
+
 			var collectionPath dbus.ObjectPath
 			props := map[string]dbus.Variant{
 				"org.freedesktop.Secret.Collection.Label": dbus.MakeVariant("collection"),
@@ -385,6 +407,8 @@ func TestSmss(t *testing.T) {
 		})
 
 		t.Run(METHOD_COLLECTION_SEARCH_ITEMS, func(t *testing.T) {
+			t.Parallel()
+
 			var sessionPath dbus.ObjectPath
 			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
 				new(dbus.Variant), &sessionPath)
@@ -473,6 +497,8 @@ func TestSmss(t *testing.T) {
 		})
 
 		t.Run(METHOD_COLLECTION_CREATE_ITEM, func(t *testing.T) {
+			t.Parallel()
+
 			var sessionPath dbus.ObjectPath
 			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
 				new(dbus.Variant), &sessionPath)
@@ -522,6 +548,8 @@ func TestSmss(t *testing.T) {
 		collection := conn.Object(dest, collectionPath)
 
 		t.Run(METHOD_ITEM_DELETE, func(t *testing.T) {
+			t.Parallel()
+
 			var sessionPath dbus.ObjectPath
 			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
 				new(dbus.Variant), &sessionPath)
@@ -556,6 +584,8 @@ func TestSmss(t *testing.T) {
 		})
 
 		t.Run(METHOD_ITEM_GET_SECRET, func(t *testing.T) {
+			t.Parallel()
+
 			var sessionPath dbus.ObjectPath
 			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
 				new(dbus.Variant), &sessionPath)
@@ -595,6 +625,8 @@ func TestSmss(t *testing.T) {
 		})
 
 		t.Run(METHOD_ITEM_SET_SECRET, func(t *testing.T) {
+			t.Parallel()
+
 			var sessionPath dbus.ObjectPath
 			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
 				new(dbus.Variant), &sessionPath)
@@ -645,6 +677,8 @@ func TestSmss(t *testing.T) {
 		service := conn.Object(dest, "/org/freedesktop/secrets")
 
 		t.Run(METHOD_SESSION_CLOSE, func(t *testing.T) {
+			t.Parallel()
+
 			var sessionPath dbus.ObjectPath
 			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
 				new(dbus.Variant), &sessionPath)

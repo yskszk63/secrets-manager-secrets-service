@@ -97,12 +97,11 @@ func (s *service) OpenSession(algorithmName string, input dbus.Variant) (*dbus.V
 
 	s.seq += 1
 
-	session := newSession(s.env, s.seq, alg)
+	session := s.env.putSession(func(e *Env, u uint32) *session { return newSession(e, u, alg) })
 	if err := session.export(); err != nil {
 		log.Println(err)
 		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
 	}
-	s.env.sessions[session.path] = session
 
 	return output, &session.path, nil
 }
@@ -175,17 +174,18 @@ func (s *service) Lock(objects []dbus.ObjectPath) ([]dbus.ObjectPath, *dbus.Obje
 }
 
 func (s *service) GetSecrets(items []dbus.ObjectPath, sessionPath dbus.ObjectPath) (map[dbus.ObjectPath]*secret, *dbus.Error) {
+	sessionobj, unlock, found := s.env.lookupSession(sessionPath)
+	if !found {
+		return nil, errNoSession
+	}
+	defer unlock()
+
 	tx, err := s.env.db.Begin()
 	if err != nil {
 		log.Println(err)
 		return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
 	}
 	defer tx.Rollback()
-
-	sessionobj, found := s.env.sessions[sessionPath]
-	if !found {
-		return nil, errNoSession
-	}
 
 	results := make(map[dbus.ObjectPath]*secret, len(items))
 	for _, item := range items {

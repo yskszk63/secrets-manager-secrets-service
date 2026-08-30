@@ -25,6 +25,8 @@ func main() {
 	}
 	defer db.Close()
 
+	db.SetMaxOpenConns(1)
+
 	if err := smss.Migrate(db); err != nil {
 		panic(err)
 	}

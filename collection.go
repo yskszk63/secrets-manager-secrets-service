@@ -116,10 +116,11 @@ func (s *collection) SearchItems(attributes map[string]string) ([]dbus.ObjectPat
 }
 
 func (s *collection) CreateItem(properties map[string]dbus.Variant, secret secret, replace bool) (*dbus.ObjectPath, *dbus.ObjectPath, *dbus.Error) {
-	session, found := s.env.sessions[secret.Session]
+	session, unlock, found := s.env.lookupSession(secret.Session)
 	if !found {
 		return nil, nil, errNoSession
 	}
+	defer unlock()
 
 	sec, err := session.decrypt(&secret)
 	if err != nil {
