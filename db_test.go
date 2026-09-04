@@ -32,7 +32,11 @@ func TestInsertFindCollection(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	col := &dbCollection{label: new("test")}
+	col := &dbCollection{
+		label:    new("test"),
+		created:  new(uint64(0)),
+		modified: new(uint64(0)),
+	}
 	if err := insertCollection(tx, col); err != nil {
 		t.Fatal(err)
 	}
@@ -74,11 +78,19 @@ func TestListCollections(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	c1 := &dbCollection{label: new("a")}
+	c1 := &dbCollection{
+		label:    new("a"),
+		created:  new(uint64(0)),
+		modified: new(uint64(0)),
+	}
 	if err := insertCollection(tx, c1); err != nil {
 		t.Fatal(err)
 	}
-	c2 := &dbCollection{label: new("b")}
+	c2 := &dbCollection{
+		label:    new("b"),
+		created:  new(uint64(0)),
+		modified: new(uint64(0)),
+	}
 	if err := insertCollection(tx, c2); err != nil {
 		t.Fatal(err)
 	}
@@ -127,6 +139,8 @@ func TestItemInsertUpdate(t *testing.T) {
 		secret:         []byte("secret"),
 		contentType:    new("text/plain"),
 		label:          new("ok"),
+		created:        new(uint64(0)),
+		modified:       new(uint64(0)),
 		attributes: map[string]string{
 			"a": "1",
 		},
@@ -169,6 +183,8 @@ func TestSearchItems(t *testing.T) {
 		secret:         []byte("secret1"),
 		contentType:    new("text/plain"),
 		label:          new("item1"),
+		created:        new(uint64(0)),
+		modified:       new(uint64(0)),
 		attributes: map[string]string{
 			"a": "1",
 			"b": "2",
@@ -184,6 +200,8 @@ func TestSearchItems(t *testing.T) {
 		secret:         []byte("secret2"),
 		contentType:    new("text/plain"),
 		label:          new("item2"),
+		created:        new(uint64(0)),
+		modified:       new(uint64(0)),
 		attributes: map[string]string{
 			"a": "1",
 			"b": "2",
@@ -198,6 +216,8 @@ func TestSearchItems(t *testing.T) {
 		secret:         []byte("secret3"),
 		contentType:    new("text/plain"),
 		label:          new("item3"),
+		created:        new(uint64(0)),
+		modified:       new(uint64(0)),
 		attributes: map[string]string{
 			"a": "2",
 		},

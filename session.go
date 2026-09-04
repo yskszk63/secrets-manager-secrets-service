@@ -132,5 +132,9 @@ func (s *session) Set(iface, name string, value dbus.Variant) *dbus.Error {
 }
 
 func (s *session) GetAll(iface string) (map[string]dbus.Variant, *dbus.Error) {
-	return nil, prop.ErrIfaceNotFound
+	if iface != "org.freedesktop.Secret.Session" {
+		return nil, prop.ErrIfaceNotFound
+	}
+
+	return map[string]dbus.Variant{}, nil
 }

@@ -1,11 +1,13 @@
 package smss
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"math/big"
 
 	"github.com/godbus/dbus/v5"
+	"github.com/godbus/dbus/v5/prop"
 )
 
 type service struct {
@@ -46,6 +48,40 @@ func (s *service) export() error {
 	}
 
 	return nil
+}
+
+func (s *service) getProperties(tx *sql.Tx, interests ...string) (map[string]*dbus.Variant, *dbus.Error) {
+	result := make(map[string]*dbus.Variant, len(interests))
+
+	for _, name := range interests {
+		switch name {
+		case "Collections":
+			collections := make([]dbus.ObjectPath, 0)
+			for c, err := range listCollections(tx) {
+				if err != nil {
+					log.Println(err)
+					return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+				}
+				collections = append(collections, dbus.ObjectPath(*c))
+			}
+			result[name] = new(dbus.MakeVariant(collections))
+
+		default:
+			return nil, prop.ErrPropNotFound
+		}
+	}
+
+	return result, nil
+}
+
+func (s *service) setProperty(tx *sql.Tx, name string, value dbus.Variant) *dbus.Error {
+	switch name {
+	case "Collections":
+		return prop.ErrReadOnly
+
+	default:
+		return prop.ErrPropNotFound
+	}
 }
 
 // org.freedesktop.Secret.Service
@@ -122,7 +158,11 @@ func (s *service) CreateCollection(properties map[string]dbus.Variant, alias str
 
 	label := labelv.Value().(string)
 
-	col := dbCollection{label: new(label)}
+	col := dbCollection{
+		label:    new(label),
+		created:  new(s.env.now()),
+		modified: new(s.env.now()),
+	}
 	if err := insertCollection(tx, &col); err != nil {
 		log.Println(err)
 		return nil, nil, dbus.MakeFailedError(fmt.Errorf("failure"))
@@ -230,50 +270,65 @@ func (s *service) Get(iface, name string) (*dbus.Variant, *dbus.Error) {
 	case "org.freedesktop.Secret.Service":
 		switch name {
 		case "Collections":
-			tx, err := s.env.db.Begin()
-			if err != nil {
-				log.Println(err)
-				return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
-			}
-			defer tx.Rollback()
-
-			paths := make([]*dbus.ObjectPath, 0)
-			for path, err := range listCollections(tx) {
-				if err != nil {
-					log.Println(err)
-					return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
-				}
-				paths = append(paths, new(dbus.ObjectPath(*path)))
-			}
-
-			return new(dbus.MakeVariant(paths)), nil
-
 		default:
-			return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+			return nil, prop.ErrPropNotFound
 		}
 
 	default:
-		return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+		return nil, prop.ErrIfaceNotFound
 	}
+
+	tx, err := s.env.db.Begin()
+	if err != nil {
+		log.Println(err)
+		return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+	defer tx.Rollback()
+
+	props, dbusErr := s.getProperties(tx, name)
+	if dbusErr != nil {
+		return nil, dbusErr
+	}
+	return props[name], nil
 }
 
 func (s *service) Set(iface, name string, value dbus.Variant) *dbus.Error {
-	return dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	switch iface {
+	case "org.freedesktop.Secret.Service":
+		switch name {
+		case "Collections":
+		default:
+			return prop.ErrPropNotFound
+		}
+
+	default:
+		return prop.ErrIfaceNotFound
+	}
+
+	tx, err := s.env.db.Begin()
+	if err != nil {
+		log.Println(err)
+		return dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+	defer tx.Rollback()
+
+	return s.setProperty(tx, name, value)
 }
 
 func (s *service) GetAll(iface string) (map[string]*dbus.Variant, *dbus.Error) {
 	switch iface {
 	case "org.freedesktop.Secret.Service":
-		collections, err := s.Get(iface, "Collections")
-		if err != nil {
-			return nil, err
-		}
-
-		return map[string]*dbus.Variant{
-			"Collections": collections,
-		}, nil
 
 	default:
-		return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+		return nil, prop.ErrIfaceNotFound
 	}
+
+	tx, err := s.env.db.Begin()
+	if err != nil {
+		log.Println(err)
+		return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+	defer tx.Rollback()
+
+	return s.getProperties(tx, "Collections")
 }

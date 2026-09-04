@@ -1,11 +1,13 @@
 package smss
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"strings"
 
 	"github.com/godbus/dbus/v5"
+	"github.com/godbus/dbus/v5/prop"
 )
 
 type collection struct {
@@ -49,6 +51,108 @@ func (c *collection) exportTo(path dbus.ObjectPath) error {
 
 func (c *collection) export() error {
 	return c.exportTo(c.path)
+}
+
+func (c *collection) getProperties(tx *sql.Tx, interests ...string) (map[string]*dbus.Variant, *dbus.Error) {
+	var data *dbCollection
+	result := make(map[string]*dbus.Variant, len(interests))
+
+	for _, name := range interests {
+		switch name {
+		case "Items":
+			// TODO remove me!
+			prefix := c.path + "/"
+
+			items := make([]dbus.ObjectPath, 0)
+			for i, err := range searchItems(tx, map[string]string{}) {
+				if err != nil {
+					log.Println(err)
+					return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+				}
+
+				if !strings.HasPrefix(*i, string(prefix)) {
+					continue
+				}
+
+				items = append(items, dbus.ObjectPath(*i))
+			}
+			result[name] = new(dbus.MakeVariant(items))
+
+		case "Label":
+			if data == nil {
+				var err error
+				data, err = findCollection(tx, string(c.path))
+				if err != nil {
+					log.Println(err)
+					return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+				}
+			}
+
+			result[name] = new(dbus.MakeVariant(data.label))
+
+		case "Locked":
+			result[name] = new(dbus.MakeVariant(false))
+
+		case "Created":
+			if data == nil {
+				var err error
+				data, err = findCollection(tx, string(c.path))
+				if err != nil {
+					log.Println(err)
+					return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+				}
+			}
+
+			result[name] = new(dbus.MakeVariant(data.created))
+
+		case "Modified":
+			if data == nil {
+				var err error
+				data, err = findCollection(tx, string(c.path))
+				if err != nil {
+					log.Println(err)
+					return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+				}
+			}
+
+			result[name] = new(dbus.MakeVariant(data.modified))
+
+		default:
+			return nil, prop.ErrPropNotFound
+		}
+	}
+
+	return result, nil
+}
+
+func (c *collection) setProperty(tx *sql.Tx, name string, value dbus.Variant) *dbus.Error {
+	switch name {
+	case "Items":
+		return prop.ErrReadOnly
+
+	case "Label":
+		v, ok := value.Value().(string)
+		if !ok {
+			return &dbus.ErrMsgInvalidArg
+		}
+		if err := updateCollectionLabel(tx, string(c.path), v); err != nil {
+			log.Println(err)
+			return dbus.MakeFailedError(fmt.Errorf("failure"))
+		}
+		return nil
+
+	case "Locked":
+		return prop.ErrReadOnly
+
+	case "Created":
+		return prop.ErrReadOnly
+
+	case "Modified":
+		return prop.ErrReadOnly
+
+	default:
+		return prop.ErrPropNotFound
+	}
 }
 
 // org.freedesktop.Secret.Collection
@@ -96,6 +200,7 @@ func (s *collection) SearchItems(attributes map[string]string) ([]dbus.ObjectPat
 	}
 	defer tx.Rollback()
 
+	// TODO remove me!
 	prefix := s.path + "/"
 
 	paths := []dbus.ObjectPath{}
@@ -153,6 +258,8 @@ func (s *collection) CreateItem(properties map[string]dbus.Variant, secret secre
 		contentType: &secret.ContentType,
 		label:       &label,
 		attributes:  attr,
+		created:     new(s.env.now()),
+		modified:    new(s.env.now()),
 	}
 
 	if replace {
@@ -200,13 +307,92 @@ func (s *collection) CreateItem(properties map[string]dbus.Variant, secret secre
 // org.freedesktop.DBus.Properties
 
 func (c *collection) Get(iface, name string) (*dbus.Variant, *dbus.Error) {
-	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	switch iface {
+	case "org.freedesktop.Secret.Collection":
+		switch name {
+		case "Items":
+		case "Label":
+		case "Locked":
+		case "Created":
+		case "Modified":
+
+		default:
+			return nil, prop.ErrPropNotFound
+		}
+
+	default:
+		return nil, prop.ErrIfaceNotFound
+	}
+
+	tx, err := c.env.db.Begin()
+	if err != nil {
+		log.Println(err)
+		return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+	defer tx.Rollback()
+
+	props, dbusErr := c.getProperties(tx, name)
+	if dbusErr != nil {
+		return nil, dbusErr
+	}
+	return props[name], nil
 }
 
 func (c *collection) Set(iface, name string, value dbus.Variant) *dbus.Error {
-	return dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+	switch iface {
+	case "org.freedesktop.Secret.Collection":
+		switch name {
+		case "Items":
+			return prop.ErrReadOnly
+		case "Label":
+		case "Locked":
+			return prop.ErrReadOnly
+		case "Created":
+			return prop.ErrReadOnly
+		case "Modified":
+			return prop.ErrReadOnly
+
+		default:
+			return prop.ErrPropNotFound
+		}
+
+	default:
+		return prop.ErrIfaceNotFound
+	}
+
+	tx, err := c.env.db.Begin()
+	if err != nil {
+		log.Println(err)
+		return dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+	defer tx.Rollback()
+
+	if err := c.setProperty(tx, name, value); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Println(err)
+		return dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+
+	return nil
 }
 
-func (c *collection) GetAll(iface string) (map[string]dbus.Variant, *dbus.Error) {
-	return nil, dbus.MakeFailedError(fmt.Errorf("Not Implemented"))
+func (c *collection) GetAll(iface string) (map[string]*dbus.Variant, *dbus.Error) {
+	switch iface {
+	case "org.freedesktop.Secret.Collection":
+
+	default:
+		return nil, prop.ErrIfaceNotFound
+	}
+
+	tx, err := c.env.db.Begin()
+	if err != nil {
+		log.Println(err)
+		return nil, dbus.MakeFailedError(fmt.Errorf("failure"))
+	}
+	defer tx.Rollback()
+
+	return c.getProperties(tx, "Items", "Label", "Locked", "Created", "Modified")
 }

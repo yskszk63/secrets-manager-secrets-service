@@ -3,13 +3,16 @@ package smss_test
 import (
 	"bufio"
 	"database/sql"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/godbus/dbus/v5"
+	"github.com/godbus/dbus/v5/prop"
 	"github.com/yskszk63/smss"
 	_ "modernc.org/sqlite"
 )
@@ -72,6 +75,9 @@ func initDBusConnForTest(t testing.TB) *dbus.Conn {
 	}
 
 	env := smss.NewEnv(db, conn)
+	env.SetClock(func() time.Time {
+		return time.Unix(1234, 0)
+	})
 	if err := smss.Start(env); err != nil {
 		t.Fatal(err)
 	}
@@ -107,10 +113,32 @@ const METHOD_ITEM_SET_SECRET = "org.freedesktop.Secret.Item.SetSecret"
 const IFACE_SESSION = "org.freedesktop.Secret.Session"
 const METHOD_SESSION_CLOSE = "org.freedesktop.Secret.Session.Close"
 
+const IFACE_PROPERTIES = "org.freedesktop.DBus.Properties"
+const METHOD_PROPERTIES_GET = "org.freedesktop.DBus.Properties.Get"
+const METHOD_PROPERTIES_SET = "org.freedesktop.DBus.Properties.Set"
+const METHOD_PROPERTIES_GET_ALL = "org.freedesktop.DBus.Properties.GetAll"
+
 func call(t testing.TB, call *dbus.Call, retvalues ...any) {
 	if err := call.Store(retvalues...); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func callErr(t testing.TB, call *dbus.Call, expected *dbus.Error, retvalues ...any) {
+	if err := call.Store(retvalues...); err != nil {
+		if err, ok := err.(dbus.Error); ok {
+			if err.Name != expected.Name {
+				t.Fatal(err)
+			}
+			if slices.Equal(err.Body, expected.Body) {
+				return
+			}
+		}
+
+		t.Fatal(err)
+	}
+
+	t.Fatal("no error")
 }
 
 func TestSmss(t *testing.T) {
@@ -382,14 +410,58 @@ func TestSmss(t *testing.T) {
 
 			call(t, service.Call(METHOD_SERVICE_SET_ALIAS, 0, "foo", "/"))
 		})
+
+		t.Run(METHOD_PROPERTIES_GET_ALL, func(t *testing.T) {
+			t.Parallel()
+
+			var m map[string]dbus.Variant
+			call(t, service.Call(METHOD_PROPERTIES_GET_ALL, 0, IFACE_SERVICE), &m)
+
+			collections := m["Collections"].Value().([]dbus.ObjectPath)
+
+			if !slices.Contains(collections, dbus.ObjectPath("/org/freedesktop/secrets/collection/1")) {
+				t.Fatal(collections)
+			}
+		})
+
+		t.Run(METHOD_PROPERTIES_GET, func(t *testing.T) {
+			t.Run("Collections", func(t *testing.T) {
+				t.Parallel()
+
+				var v dbus.Variant
+				call(t, service.Call(METHOD_PROPERTIES_GET, 0, IFACE_SERVICE, "Collections"), &v)
+
+				collections := v.Value().([]dbus.ObjectPath)
+
+				if !slices.Contains(collections, dbus.ObjectPath("/org/freedesktop/secrets/collection/1")) {
+					t.Fatal(collections)
+				}
+			})
+		})
+
+		t.Run(METHOD_PROPERTIES_SET, func(t *testing.T) {
+			t.Run("Collections", func(t *testing.T) {
+				t.Parallel()
+
+				v := dbus.MakeVariant([]dbus.ObjectPath{})
+				callErr(t, service.Call(METHOD_PROPERTIES_SET, 0, IFACE_SERVICE, "Collections", v), prop.ErrReadOnly)
+			})
+		})
 	})
 
 	t.Run(IFACE_COLLECTION, func(t *testing.T) {
 		service := conn.Object(dest, "/org/freedesktop/secrets")
 
-		t.Run(METHOD_COLLECTION_DELETE, func(t *testing.T) {
-			t.Parallel()
+		var sessionPath dbus.ObjectPath
+		call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
+			new(dbus.Variant), &sessionPath)
 
+		t.Cleanup(func() {
+			session := conn.Object(dest, sessionPath)
+			call(t, session.Call(METHOD_SESSION_CLOSE, 0))
+		})
+
+		fixture := func(t testing.TB) dbus.BusObject {
 			var collectionPath dbus.ObjectPath
 			props := map[string]dbus.Variant{
 				"org.freedesktop.Secret.Collection.Label": dbus.MakeVariant("collection"),
@@ -397,7 +469,13 @@ func TestSmss(t *testing.T) {
 			call(t, service.Call(METHOD_SERVICE_CREATE_COLLECTION, 0, props, ""),
 				&collectionPath, new(dbus.ObjectPath))
 
-			collection := conn.Object(dest, collectionPath)
+			return conn.Object(dest, collectionPath)
+		}
+
+		t.Run(METHOD_COLLECTION_DELETE, func(t *testing.T) {
+			t.Parallel()
+
+			collection := fixture(t)
 
 			var prompt dbus.ObjectPath
 			call(t, collection.Call(METHOD_COLLECTION_DELETE, 0), &prompt)
@@ -409,23 +487,7 @@ func TestSmss(t *testing.T) {
 		t.Run(METHOD_COLLECTION_SEARCH_ITEMS, func(t *testing.T) {
 			t.Parallel()
 
-			var sessionPath dbus.ObjectPath
-			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
-				new(dbus.Variant), &sessionPath)
-
-			t.Cleanup(func() {
-				session := conn.Object(dest, sessionPath)
-				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
-			})
-
-			var collectionPath dbus.ObjectPath
-			props := map[string]dbus.Variant{
-				"org.freedesktop.Secret.Collection.Label": dbus.MakeVariant("collection"),
-			}
-			call(t, service.Call(METHOD_SERVICE_CREATE_COLLECTION, 0, props, ""),
-				&collectionPath, new(dbus.ObjectPath))
-
-			collection := conn.Object(dest, collectionPath)
+			collection := fixture(t)
 
 			var item1Path dbus.ObjectPath
 			var item2Path dbus.ObjectPath
@@ -499,22 +561,7 @@ func TestSmss(t *testing.T) {
 		t.Run(METHOD_COLLECTION_CREATE_ITEM, func(t *testing.T) {
 			t.Parallel()
 
-			var sessionPath dbus.ObjectPath
-			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
-				new(dbus.Variant), &sessionPath)
-
-			t.Cleanup(func() {
-				session := conn.Object(dest, sessionPath)
-				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
-			})
-
-			var collectionPath dbus.ObjectPath
-			props := map[string]dbus.Variant{
-				"org.freedesktop.Secret.Collection.Label": dbus.MakeVariant("collection"),
-			}
-			call(t, service.Call(METHOD_SERVICE_CREATE_COLLECTION, 0, props, ""),
-				&collectionPath, new(dbus.ObjectPath))
-			collection := conn.Object(dest, collectionPath)
+			collection := fixture(t)
 
 			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
 				map[string]dbus.Variant{
@@ -534,6 +581,162 @@ func TestSmss(t *testing.T) {
 				new(dbus.ObjectPath), new(dbus.ObjectPath),
 			)
 		})
+
+		t.Run(METHOD_PROPERTIES_GET_ALL, func(t *testing.T) {
+			t.Parallel()
+
+			collection := fixture(t)
+
+			var m map[string]dbus.Variant
+			call(t, collection.Call(METHOD_PROPERTIES_GET_ALL, 0, IFACE_COLLECTION), &m)
+
+			if !slices.Equal(m["Items"].Value().([]dbus.ObjectPath), []dbus.ObjectPath{}) {
+				t.Fatal(m["Items"])
+			}
+			if m["Label"].Value() != "collection" {
+				t.Fatal(m["Label"])
+			}
+			if m["Locked"].Value() != false {
+				t.Fatal(m["Locked"])
+			}
+			if m["Created"].Value() != uint64(1234) {
+				t.Fatal(m["Created"])
+			}
+			if m["Modified"].Value() != uint64(1234) {
+				t.Fatal(m["Modified"])
+			}
+		})
+
+		t.Run(METHOD_PROPERTIES_GET, func(t *testing.T) {
+			t.Run("Items", func(t *testing.T) {
+				t.Parallel()
+
+				collection := fixture(t)
+
+				var v dbus.Variant
+				call(t, collection.Call(METHOD_PROPERTIES_GET, 0, IFACE_COLLECTION, "Items"), &v)
+
+				expected := []dbus.ObjectPath{ /* todo */ }
+
+				if !slices.Equal(v.Value().([]dbus.ObjectPath), expected) {
+					t.Fatal(v, expected)
+				}
+			})
+
+			t.Run("Label", func(t *testing.T) {
+				t.Parallel()
+
+				collection := fixture(t)
+
+				var v dbus.Variant
+				call(t, collection.Call(METHOD_PROPERTIES_GET, 0, IFACE_COLLECTION, "Label"), &v)
+
+				expected := "collection"
+
+				if v.Value() != expected {
+					t.Fatal(v, expected)
+				}
+			})
+
+			t.Run("Locked", func(t *testing.T) {
+				t.Parallel()
+
+				collection := fixture(t)
+
+				var v dbus.Variant
+				call(t, collection.Call(METHOD_PROPERTIES_GET, 0, IFACE_COLLECTION, "Locked"), &v)
+
+				expected := false
+
+				if v.Value() != expected {
+					t.Fatal(v, expected)
+				}
+			})
+
+			t.Run("Created", func(t *testing.T) {
+				t.Parallel()
+
+				collection := fixture(t)
+
+				var v dbus.Variant
+				call(t, collection.Call(METHOD_PROPERTIES_GET, 0, IFACE_COLLECTION, "Created"), &v)
+
+				expected := uint64(1234)
+
+				if v.Value() != expected {
+					t.Fatal(v, expected)
+				}
+			})
+
+			t.Run("Modified", func(t *testing.T) {
+				t.Parallel()
+
+				collection := fixture(t)
+
+				var v dbus.Variant
+				call(t, collection.Call(METHOD_PROPERTIES_GET, 0, IFACE_COLLECTION, "Modified"), &v)
+
+				expected := uint64(1234)
+
+				if v.Value() != expected {
+					t.Fatal(v, expected)
+				}
+			})
+		})
+
+		t.Run(METHOD_PROPERTIES_SET, func(t *testing.T) {
+			t.Run("Items", func(t *testing.T) {
+				t.Parallel()
+
+				collection := fixture(t)
+
+				v := dbus.MakeVariant([]dbus.ObjectPath{})
+				callErr(t, collection.Call(METHOD_PROPERTIES_SET, 0, IFACE_COLLECTION, "Items", v), prop.ErrReadOnly)
+			})
+
+			t.Run("Label", func(t *testing.T) {
+				t.Parallel()
+
+				collection := fixture(t)
+
+				v := dbus.MakeVariant("Changed")
+				call(t, collection.Call(METHOD_PROPERTIES_SET, 0, IFACE_COLLECTION, "Label", v))
+
+				var v2 dbus.Variant
+				call(t, collection.Call(METHOD_PROPERTIES_GET, 0, IFACE_COLLECTION, "Label"), &v2)
+
+				if v != v2 {
+					t.Fatal(v2)
+				}
+			})
+
+			t.Run("Locked", func(t *testing.T) {
+				t.Parallel()
+
+				collection := fixture(t)
+
+				v := dbus.MakeVariant(true)
+				callErr(t, collection.Call(METHOD_PROPERTIES_SET, 0, IFACE_COLLECTION, "Locked", v), prop.ErrReadOnly)
+			})
+
+			t.Run("Created", func(t *testing.T) {
+				t.Parallel()
+
+				collection := fixture(t)
+
+				v := dbus.MakeVariant(uint64(0))
+				callErr(t, collection.Call(METHOD_PROPERTIES_SET, 0, IFACE_COLLECTION, "Created", v), prop.ErrReadOnly)
+			})
+
+			t.Run("Modified", func(t *testing.T) {
+				t.Parallel()
+
+				collection := fixture(t)
+
+				v := dbus.MakeVariant(uint64(0))
+				callErr(t, collection.Call(METHOD_PROPERTIES_SET, 0, IFACE_COLLECTION, "Modified", v), prop.ErrReadOnly)
+			})
+		})
 	})
 
 	t.Run(IFACE_ITEM, func(t *testing.T) {
@@ -547,18 +750,16 @@ func TestSmss(t *testing.T) {
 			&collectionPath, new(dbus.ObjectPath))
 		collection := conn.Object(dest, collectionPath)
 
-		t.Run(METHOD_ITEM_DELETE, func(t *testing.T) {
-			t.Parallel()
+		var sessionPath dbus.ObjectPath
+		call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
+			new(dbus.Variant), &sessionPath)
 
-			var sessionPath dbus.ObjectPath
-			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
-				new(dbus.Variant), &sessionPath)
+		t.Cleanup(func() {
+			session := conn.Object(dest, sessionPath)
+			call(t, session.Call(METHOD_SESSION_CLOSE, 0))
+		})
 
-			t.Cleanup(func() {
-				session := conn.Object(dest, sessionPath)
-				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
-			})
-
+		fixture := func(t testing.TB) dbus.BusObject {
 			var itemPath dbus.ObjectPath
 			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
 				map[string]dbus.Variant{
@@ -578,43 +779,23 @@ func TestSmss(t *testing.T) {
 				&itemPath, new(dbus.ObjectPath),
 			)
 
-			item := conn.Object(dest, itemPath)
+			return conn.Object(dest, itemPath)
+
+		}
+
+		t.Run(METHOD_ITEM_DELETE, func(t *testing.T) {
+			t.Parallel()
+
+			item := fixture(t)
 
 			call(t, item.Call(METHOD_ITEM_DELETE, 0), new(dbus.ObjectPath))
+			// TODO check
 		})
 
 		t.Run(METHOD_ITEM_GET_SECRET, func(t *testing.T) {
 			t.Parallel()
 
-			var sessionPath dbus.ObjectPath
-			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
-				new(dbus.Variant), &sessionPath)
-
-			t.Cleanup(func() {
-				session := conn.Object(dest, sessionPath)
-				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
-			})
-
-			var itemPath dbus.ObjectPath
-			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
-				map[string]dbus.Variant{
-					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item1"),
-					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
-						"a": t.Name() + "1",
-						"b": "2",
-						"c": "3",
-					}),
-				},
-				secret{
-					Session:     sessionPath,
-					Parameters:  []byte{},
-					Value:       []byte("ITEM1"),
-					ContentType: "text/plain",
-				}, false),
-				&itemPath, new(dbus.ObjectPath),
-			)
-
-			item := conn.Object(dest, itemPath)
+			item := fixture(t)
 
 			var s secret
 			call(t, item.Call(METHOD_ITEM_GET_SECRET, 0, sessionPath), &s)
@@ -627,35 +808,7 @@ func TestSmss(t *testing.T) {
 		t.Run(METHOD_ITEM_SET_SECRET, func(t *testing.T) {
 			t.Parallel()
 
-			var sessionPath dbus.ObjectPath
-			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
-				new(dbus.Variant), &sessionPath)
-
-			t.Cleanup(func() {
-				session := conn.Object(dest, sessionPath)
-				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
-			})
-
-			var itemPath dbus.ObjectPath
-			call(t, collection.Call(METHOD_COLLECTION_CREATE_ITEM, 0,
-				map[string]dbus.Variant{
-					"org.freedesktop.Secret.Item.Label": dbus.MakeVariant("item1"),
-					"org.freedesktop.Secret.Item.Attributes": dbus.MakeVariant(map[string]string{
-						"a": t.Name() + "1",
-						"b": "2",
-						"c": "3",
-					}),
-				},
-				secret{
-					Session:     sessionPath,
-					Parameters:  []byte{},
-					Value:       []byte("ITEM1"),
-					ContentType: "text/plain",
-				}, false),
-				&itemPath, new(dbus.ObjectPath),
-			)
-
-			item := conn.Object(dest, itemPath)
+			item := fixture(t)
 
 			call(t, item.Call(METHOD_ITEM_SET_SECRET, 0, secret{
 				Session:     sessionPath,
@@ -671,23 +824,213 @@ func TestSmss(t *testing.T) {
 				t.Fatal()
 			}
 		})
+
+		t.Run(METHOD_PROPERTIES_GET_ALL, func(t *testing.T) {
+			t.Parallel()
+
+			item := fixture(t)
+
+			var m map[string]dbus.Variant
+			call(t, item.Call(METHOD_PROPERTIES_GET_ALL, 0, IFACE_ITEM), &m)
+
+			if m["Locked"].Value() != false {
+				t.Fatal(m["Locked"])
+			}
+			if !maps.Equal(m["Attributes"].Value().(map[string]string), map[string]string{
+				"a": t.Name() + "1",
+				"b": "2",
+				"c": "3",
+			}) {
+				t.Fatal(m["Attributes"])
+			}
+		})
+
+		t.Run(METHOD_PROPERTIES_GET, func(t *testing.T) {
+			t.Run("Locked", func(t *testing.T) {
+				t.Parallel()
+
+				item := fixture(t)
+
+				var v dbus.Variant
+				call(t, item.Call(METHOD_PROPERTIES_GET, 0, IFACE_ITEM, "Locked"), &v)
+
+				expected := false
+
+				if v.Value() != expected {
+					t.Fatal(v, expected)
+				}
+			})
+
+			t.Run("Attributes", func(t *testing.T) {
+				t.Parallel()
+
+				item := fixture(t)
+
+				var v dbus.Variant
+				call(t, item.Call(METHOD_PROPERTIES_GET, 0, IFACE_ITEM, "Attributes"), &v)
+
+				expected := map[string]string{
+					"a": t.Name() + "1",
+					"b": "2",
+					"c": "3",
+				}
+
+				if !maps.Equal(v.Value().(map[string]string), expected) {
+					t.Fatal(v, expected)
+				}
+			})
+
+			t.Run("Label", func(t *testing.T) {
+				t.Parallel()
+
+				item := fixture(t)
+
+				var v dbus.Variant
+				call(t, item.Call(METHOD_PROPERTIES_GET, 0, IFACE_ITEM, "Label"), &v)
+
+				expected := "item1"
+
+				if v.Value() != expected {
+					t.Fatal(v, expected)
+				}
+			})
+
+			t.Run("Created", func(t *testing.T) {
+				t.Parallel()
+
+				item := fixture(t)
+
+				var v dbus.Variant
+				call(t, item.Call(METHOD_PROPERTIES_GET, 0, IFACE_ITEM, "Created"), &v)
+
+				expected := uint64(1234)
+
+				if v.Value() != expected {
+					t.Fatal(v, expected)
+				}
+			})
+
+			t.Run("Modified", func(t *testing.T) {
+				t.Parallel()
+
+				item := fixture(t)
+
+				var v dbus.Variant
+				call(t, item.Call(METHOD_PROPERTIES_GET, 0, IFACE_ITEM, "Modified"), &v)
+
+				expected := uint64(1234)
+
+				if v.Value() != expected {
+					t.Fatal(v, expected)
+				}
+			})
+		})
+
+		t.Run(METHOD_PROPERTIES_SET, func(t *testing.T) {
+			t.Run("Locked", func(t *testing.T) {
+				t.Parallel()
+
+				item := fixture(t)
+
+				v := dbus.MakeVariant(true)
+				callErr(t, item.Call(METHOD_PROPERTIES_SET, 0, IFACE_ITEM, "Locked", v), prop.ErrReadOnly)
+			})
+
+			t.Run("Attributes", func(t *testing.T) {
+				t.Parallel()
+
+				item := fixture(t)
+
+				v := dbus.MakeVariant(map[string]string{
+					"a": t.Name() + "2",
+					"b": "2",
+					"c": "3",
+				})
+				call(t, item.Call(METHOD_PROPERTIES_SET, 0, IFACE_ITEM, "Attributes", v))
+
+				var v2 dbus.Variant
+				call(t, item.Call(METHOD_PROPERTIES_GET, 0, IFACE_ITEM, "Attributes"), &v2)
+
+				if !maps.Equal(v.Value().(map[string]string), v2.Value().(map[string]string)) {
+					t.Fatal(v, v2)
+				}
+			})
+
+			t.Run("Label", func(t *testing.T) {
+				t.Parallel()
+
+				item := fixture(t)
+
+				v := dbus.MakeVariant("changed")
+				call(t, item.Call(METHOD_PROPERTIES_SET, 0, IFACE_ITEM, "Label", v))
+
+				var v2 dbus.Variant
+				call(t, item.Call(METHOD_PROPERTIES_GET, 0, IFACE_ITEM, "Label"), &v2)
+
+				if v != v2 {
+					t.Fatal(v, v2)
+				}
+			})
+
+			t.Run("Created", func(t *testing.T) {
+				t.Parallel()
+
+				item := fixture(t)
+
+				v := dbus.MakeVariant(true)
+				callErr(t, item.Call(METHOD_PROPERTIES_SET, 0, IFACE_ITEM, "Created", v), prop.ErrReadOnly)
+			})
+
+			t.Run("Modified", func(t *testing.T) {
+				t.Parallel()
+
+				item := fixture(t)
+
+				v := dbus.MakeVariant(true)
+				callErr(t, item.Call(METHOD_PROPERTIES_SET, 0, IFACE_ITEM, "Modified", v), prop.ErrReadOnly)
+			})
+		})
 	})
 
 	t.Run(IFACE_SESSION, func(t *testing.T) {
-		service := conn.Object(dest, "/org/freedesktop/secrets")
+		tests := map[string]func(t *testing.T, obj dbus.BusObject){
+			METHOD_SESSION_CLOSE: func(t *testing.T, obj dbus.BusObject) {
+				// call cleanup
+			},
 
-		t.Run(METHOD_SESSION_CLOSE, func(t *testing.T) {
-			t.Parallel()
+			METHOD_PROPERTIES_GET_ALL: func(t *testing.T, obj dbus.BusObject) {
+				var r map[string]*dbus.Variant
+				call(t, obj.Call(METHOD_PROPERTIES_GET_ALL, 0, IFACE_SESSION), &r)
 
-			var sessionPath dbus.ObjectPath
-			call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
-				new(dbus.Variant), &sessionPath)
+				if !maps.Equal(r, map[string]*dbus.Variant{}) {
+					t.Fatal()
+				}
+			},
 
-			t.Cleanup(func() {
-				session := conn.Object(dest, sessionPath)
-				call(t, session.Call(METHOD_SESSION_CLOSE, 0))
+			METHOD_PROPERTIES_GET: func(t *testing.T, obj dbus.BusObject) {
+			},
+
+			METHOD_PROPERTIES_SET: func(t *testing.T, obj dbus.BusObject) {
+			},
+		}
+
+		for name, test := range tests {
+			service := conn.Object(dest, "/org/freedesktop/secrets")
+
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				var sessionPath dbus.ObjectPath
+				call(t, service.Call(METHOD_SERVICE_OPEN_SESSION, 0, "plain", dbus.MakeVariant("")),
+					new(dbus.Variant), &sessionPath)
+
+				obj := conn.Object(dest, sessionPath)
+				t.Cleanup(func() {
+					call(t, obj.Call(METHOD_SESSION_CLOSE, 0))
+				})
+
+				test(t, obj)
 			})
-
-		})
+		}
 	})
 }

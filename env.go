@@ -4,9 +4,12 @@ import (
 	"database/sql"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 )
+
+type Clock func() time.Time
 
 type Env struct {
 	mu       *sync.Mutex
@@ -14,6 +17,7 @@ type Env struct {
 	sessions map[dbus.ObjectPath]*session
 	db       *sql.DB
 	conn     *dbus.Conn
+	clock    Clock
 }
 
 func NewEnv(db *sql.DB, conn *dbus.Conn) *Env {
@@ -25,7 +29,16 @@ func NewEnv(db *sql.DB, conn *dbus.Conn) *Env {
 		sessions: sessions,
 		db:       db,
 		conn:     conn,
+		clock:    time.Now,
 	}
+}
+
+func (e *Env) SetClock(clock Clock) {
+	e.clock = clock
+}
+
+func (e *Env) now() uint64 {
+	return uint64(e.clock().Unix())
 }
 
 func (e *Env) lookupSession(p dbus.ObjectPath) (*session, func(), bool) {

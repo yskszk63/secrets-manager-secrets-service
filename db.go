@@ -58,8 +58,8 @@ func Migrate(db *sql.DB) error {
 type dbCollection struct {
 	path     *string
 	label    *string
-	created  *string
-	modified *string
+	created  *uint64
+	modified *uint64
 }
 
 type dbItem struct {
@@ -68,15 +68,15 @@ type dbItem struct {
 	secret         []byte
 	contentType    *string
 	label          *string
-	created        *string
-	modified       *string
+	created        *uint64
+	modified       *uint64
 	attributes     map[string]string
 }
 
 func insertCollection(tx *sql.Tx, collection *dbCollection) error {
-	q := "INSERT INTO collection (label) VALUES (?) RETURNING path"
+	q := "INSERT INTO collection (label, created, modified) VALUES (?, ?, ?) RETURNING path"
 
-	if err := tx.QueryRow(q, collection.label).Scan(&collection.path); err != nil {
+	if err := tx.QueryRow(q, collection.label, collection.created, collection.modified).Scan(&collection.path); err != nil {
 		return err
 	}
 
@@ -142,14 +142,22 @@ func listCollections(tx *sql.Tx) iter.Seq2[*string, error] {
 	}
 }
 
+func updateCollectionLabel(tx *sql.Tx, path string, label string) error {
+	q := "UPDATE collection SET label = ? WHERE path = ?"
+	if _, err := tx.Exec(q, label, path); err != nil {
+		return err
+	}
+	return nil
+}
+
 func insertItem(tx *sql.Tx, item *dbItem) error {
 	if len(item.attributes) < 1 {
 		return fmt.Errorf("must len(attributes) > 0")
 	}
 
-	q := "INSERT INTO item(collection_id, secret, content_type, label) VALUES ((SELECT id FROM collection WHERE path = ?), ?, ?, ?) RETURNING path, created, modified"
+	q := "INSERT INTO item(collection_id, secret, content_type, label, created, modified) VALUES ((SELECT id FROM collection WHERE path = ?), ?, ?, ?, ?, ?) RETURNING path"
 
-	if err := tx.QueryRow(q, item.collectionPath, item.secret, item.contentType, item.label).Scan(&item.path, &item.created, &item.modified); err != nil {
+	if err := tx.QueryRow(q, item.collectionPath, item.secret, item.contentType, item.label, item.created, item.modified).Scan(&item.path); err != nil {
 		return err
 	}
 
@@ -160,10 +168,10 @@ func insertItem(tx *sql.Tx, item *dbItem) error {
 	return nil
 }
 
-func updateItemSecret(tx *sql.Tx, path string, secret []byte, contentType string) error {
-	q := "UPDATE item SET secret = ?, content_type = ? WHERE path = ?"
+func updateItemSecret(tx *sql.Tx, path string, secret []byte, contentType string, now uint64) error {
+	q := "UPDATE item SET secret = ?, content_type = ?, modified = ? WHERE path = ?"
 
-	if _, err := tx.Exec(q, secret, contentType, path); err != nil {
+	if _, err := tx.Exec(q, secret, contentType, now, path); err != nil {
 		return err
 	}
 
@@ -175,9 +183,9 @@ func updateItem(tx *sql.Tx, item *dbItem) error {
 		return fmt.Errorf("must len(attributes) > 0")
 	}
 
-	q := "UPDATE item SET secret = ?, content_type = ?, label = ? WHERE path = ? RETURNING modified"
+	q := "UPDATE item SET secret = ?, content_type = ?, label = ?, modified = ? WHERE path = ? RETURNING modified"
 
-	if err := tx.QueryRow(q, item.secret, item.contentType, item.label, item.path).Scan(&item.modified); err != nil {
+	if err := tx.QueryRow(q, item.secret, item.contentType, item.label, item.modified, item.path).Scan(&item.modified); err != nil {
 		return err
 	}
 
@@ -233,6 +241,23 @@ func insertItemAttr(tx *sql.Tx, path string, attributes map[string]string) error
 		}
 	}
 
+	return nil
+}
+
+func deleteItemAttr(tx *sql.Tx, path string) error {
+	q := "DELETE FROM item_attr WHERE item_id IN (SELECT id FROM item WHERE path = ?)"
+	if _, err := tx.Exec(q, path); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func updateItemLabel(tx *sql.Tx, path string, label string) error {
+	q := "UPDATE item SET label = ? WHERE path = ?"
+	if _, err := tx.Exec(q, label, path); err != nil {
+		return err
+	}
 	return nil
 }
 

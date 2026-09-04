@@ -1,8 +1,8 @@
 CREATE TABLE collection (
     id INTEGER PRIMARY KEY,
     label TEXT,
-    created TEXT DEFAULT current_timestamp NOT NULL,
-    modified TEXT DEFAULT current_timestamp NOT NULL,
+    created TEXT INTEGER NOT NULL,
+    modified TEXT INTEGER NOT NULL,
     path TEXT GENERATED ALWAYS AS ('/org/freedesktop/secrets/collection/' || id) VIRTUAL
 );
 
@@ -14,8 +14,8 @@ CREATE TABLE item (
     secret BLOB NOT NULL,
     content_type TEXT NOT NULL,
     label TEXT,
-    created TEXT DEFAULT current_timestamp NOT NULL,
-    modified TEXT DEFAULT current_timestamp NOT NULL,
+    created TEXT INTEGER NOT NULL,
+    modified TEXT INTEGER NOT NULL,
     collection_path TEXT GENERATED ALWAYS AS ('/org/freedesktop/secrets/collection/' || collection_id) VIRTUAL,
     path TEXT GENERATED ALWAYS AS ('/org/freedesktop/secrets/collection/' || collection_id || '/' || id) VIRTUAL
 );
@@ -29,4 +29,4 @@ CREATE TABLE item_attr (
     PRIMARY KEY (item_id, key)
 );
 
-INSERT INTO collection (label) VALUES('default');
+INSERT INTO collection (label, created, modified) VALUES('default', 0, 0);
