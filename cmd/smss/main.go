@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"flag"
 	"fmt"
 
 	"github.com/adrg/xdg"
@@ -11,13 +12,22 @@ import (
 	"github.com/yskszk63/smss"
 )
 
-func main() {
-	file, err := xdg.DataFile("smss/db.dat")
-	if err != nil {
-		panic(err)
-	}
+var memoryFlag = flag.Bool("m", false, "memory only (ephemeral mode)")
 
-	dsn := fmt.Sprintf("file:%s", file)
+func main() {
+	flag.Parse()
+
+	var dsn string
+	if (*memoryFlag) {
+		dsn = "file:db?mode=memory"
+	} else {
+		file, err := xdg.DataFile("smss/db.dat")
+		if err != nil {
+			panic(err)
+		}
+
+		dsn = fmt.Sprintf("file:%s", file)
+	}
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
